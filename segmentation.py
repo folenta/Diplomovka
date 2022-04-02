@@ -1,11 +1,13 @@
+import copy
+
 import cv2
 import numpy as np
 from collections import Counter
 from bresenham import bresenham
 
 
-def savePalmprintSegmented(image):
-    cv2.imwrite('segmented.bmp', image)
+def saveSegmentedPalmprint(image, directoryName):
+    cv2.imwrite(f'{directoryName}/segmented.bmp', image)
 
 
 def getWhitePixelRatio(block, totalPixels):
@@ -56,7 +58,7 @@ def fillNeighborsWithIndex(foregroundRegions, currentBlock, index, blockImage, b
         bottomRow = min(currentRow + 1, blockRows - 1)
         leftCol = max(0, currentCol - 1)
         rightCol = min(currentCol + 1, blockCols - 1)
-        
+
         if blocks[topRow][currentCol]["background"] == 0:
             if foregroundRegions[topRow][currentCol] == 0:
                 foregroundRegions[topRow][currentCol] = index
@@ -118,7 +120,7 @@ def checkFingerTip(fingerTips, point, lastPalmprintRow):
 
                 distance = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
 
-                if distance <= 10:
+                if distance <= 7.5:
                     alreadyFound = True
 
             if not alreadyFound:
@@ -207,7 +209,7 @@ def cutFinger(startingPoint, endingPoint, palmprintBorder, palmprintMask, blockI
     distanceFromStartingPoint = 0
 
     for borderPoint in newFingerBorder:
-        #blockImage[borderPoint[0]][borderPoint[1]] = 0
+        # blockImage[borderPoint[0]][borderPoint[1]] = 0
         palmprintMask[borderPoint[0]][borderPoint[1]] = 0
         palmprintBorder.insert(startingPointIndex + distanceFromStartingPoint, borderPoint)
         distanceFromStartingPoint += 1
@@ -223,25 +225,25 @@ def cutFinger(startingPoint, endingPoint, palmprintBorder, palmprintMask, blockI
 
         if palmprintMask[topRow][currentCol] == 1:
             toSearch.append((topRow, currentCol))
-            #blockImage[topRow][currentCol] = 255
+            # blockImage[topRow][currentCol] = 255
             blocks[topRow][currentCol]["background"] = 1
             palmprintMask[topRow][currentCol] = 0
 
         if palmprintMask[currentRow][rightCol] == 1:
             toSearch.append((currentRow, rightCol))
-            #blockImage[currentRow][rightCol] = 255
+            # blockImage[currentRow][rightCol] = 255
             blocks[currentRow][rightCol]["background"] = 1
             palmprintMask[currentRow][rightCol] = 0
 
         if palmprintMask[bottomRow][currentCol] == 1:
             toSearch.append((bottomRow, currentCol))
-            #blockImage[bottomRow][currentCol] = 255
+            # blockImage[bottomRow][currentCol] = 255
             blocks[bottomRow][currentCol]["background"] = 1
             palmprintMask[bottomRow][currentCol] = 0
 
         if palmprintMask[currentRow][leftCol] == 1:
             toSearch.append((currentRow, leftCol))
-            #blockImage[currentRow][leftCol] = 255
+            # blockImage[currentRow][leftCol] = 255
             blocks[currentRow][leftCol]["background"] = 1
             palmprintMask[currentRow][leftCol] = 0
 
@@ -337,7 +339,6 @@ def findFingerTips(palmprintMask, palmprintBorder, blockImage, contour):
 
                 blockImage = cutFinger(palmprintBorder[startingPointIndex2 + 1], palmprintMask, blockImage)
 
-
                 currentPoint = startingPoint
                 currentPointRow, currentPointCol = currentPoint
                 for distanceFromStartingPoint in range(1, len(palmprintBorder)):
@@ -390,7 +391,7 @@ def findPalmprintBorder(palmprintMask, blockImage):
     for point in contour:
         p = point[0]
         y, x = p
-        #blockImage[x][y] = 100
+        # blockImage[x][y] = 100
         palmprintBorder.append((x, y))
 
     return palmprintBorder, blockImage, contour
@@ -426,18 +427,34 @@ def findFingerPoints(palmprintMask, contour):
     return fingerTips, pointsBetweenFingers
 
 
-def findHandOrientation(fingerTips):
+def findHandOrientation(fingerTips, bottomOfFingers):
     if len(fingerTips) == 5:
         maxValue = max(fingerTips, key=lambda t: t[0])
         maxValueIndex = fingerTips.index(maxValue)
 
         if maxValueIndex == 0:
-            return "Right"
+            return "Right", True
 
         if maxValueIndex == 4:
-            return "Left"
+            return "Left", True
 
-    return "None"
+    if len(fingerTips) == 4:
+        fingers = True
+        for fingerTip in fingerTips:
+            if fingerTip[0] >= bottomOfFingers[0] - 10:
+                fingers = False
+
+        if fingers:
+            maxValue = max(fingerTips, key=lambda t: t[0])
+            maxValueIndex = fingerTips.index(maxValue)
+
+            if maxValueIndex == 0:
+                return "Left", False
+
+            if maxValueIndex == 3:
+                return "Right", False
+
+    return "None", False
 
 
 def findPointOnTheOtherSideOfFinger(startingPoint, palmprintBorder, blocks, reverse, palmprintSegment):
@@ -474,7 +491,8 @@ def findPointOnTheOtherSideOfFinger(startingPoint, palmprintBorder, blocks, reve
     return endingPoint, blocks
 
 
-def findPointsBetweenThumb(startingPoint, palmprintBorder, blockImage, blocks, reverse, palmprintSegment):
+def findPointsBetweenThumb(startingPoint, palmprintBorder, blockImage, blocks, reverse, palmprintSegment,
+                           thumbDetected):
     startingPointIndex = palmprintBorder.index(startingPoint)
     pointsBetweenFingers = []
 
@@ -483,48 +501,111 @@ def findPointsBetweenThumb(startingPoint, palmprintBorder, blockImage, blocks, r
     currentPointRow, currentPointCol = currentPoint
     pointsBetweenFingers.append(currentPoint)
 
-    for distanceFromStartingPoint in range(1, len(palmprintBorder)):
-        nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
-        nextBorderPointRow, nextBorderPointCol = nextBorderPoint
-        if nextBorderPointRow < currentPointRow:
-            break
-        pointsBetweenFingers.append(nextBorderPoint)
-        #blockImage[nextBorderPointRow][nextBorderPointCol] = 0
-        blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = palmprintSegment
-        currentPointRow, currentPointCol = nextBorderPoint
-
-    startingPoint = pointsBetweenFingers[-1]
-    startingPointIndex = palmprintBorder.index(startingPoint)
-    startingPointRow, startingPointCol = startingPoint
-
-    minDistance = 100
-    minDistanceIndex = 0
-
-    for distanceFromStartingPoint in range(10, len(palmprintBorder)):
-        if not reverse:
+    """ Detekoval som palec...hladam dokym nenajdem hranicny blok ktory je vyssie ako predchadzajuci """
+    if thumbDetected:
+        for distanceFromStartingPoint in range(1, len(palmprintBorder)):
             nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            if nextBorderPointRow < currentPointRow:
+                break
+            pointsBetweenFingers.append(nextBorderPoint)
+            # blockImage[nextBorderPointRow][nextBorderPointCol] = 0
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = palmprintSegment
+            currentPointRow, currentPointCol = nextBorderPoint
+
+        startingPoint = pointsBetweenFingers[-1]
+        startingPointIndex = palmprintBorder.index(startingPoint)
+        startingPointRow, startingPointCol = startingPoint
+
+        minDistance = 100
+        minDistanceIndex = 0
+
+        for distanceFromStartingPoint in range(20, len(palmprintBorder)):
+            if not reverse:
+                nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
+            else:
+                nextBorderPoint = palmprintBorder[startingPointIndex - distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            if startingPointCol - 5 <= nextBorderPointCol <= startingPointCol + 5:
+                distance = np.sqrt((nextBorderPointRow - startingPointRow) ** 2 + (nextBorderPointCol -
+                                                                                   startingPointCol) ** 2)
+
+                if distance < minDistance:
+                    minDistance = distance
+                    minDistanceIndex = distanceFromStartingPoint
+
+            if nextBorderPointCol > startingPointCol + 5:
+                break
+
+        if not reverse:
+            endingPoint = palmprintBorder[startingPointIndex + minDistanceIndex]
         else:
-            nextBorderPoint = palmprintBorder[startingPointIndex - distanceFromStartingPoint]
-        nextBorderPointRow, nextBorderPointCol = nextBorderPoint
-        if startingPointCol - 5 <= nextBorderPointCol <= startingPointCol + 5:
-            distance = np.sqrt((nextBorderPointRow - startingPointRow) ** 2 + (nextBorderPointCol -
-                                                                               startingPointCol) ** 2)
+            endingPoint = palmprintBorder[startingPointIndex - minDistanceIndex]
 
-            if distance < minDistance:
-                minDistance = distance
-                minDistanceIndex = distanceFromStartingPoint
-
-        if nextBorderPointCol > startingPointCol + 5:
-            break
-
-    if not reverse:
-        endingPoint = palmprintBorder[startingPointIndex + minDistanceIndex]
+    # Nedetekoval som palec...hladam najviac lavy hranicny blok
     else:
-        endingPoint = palmprintBorder[startingPointIndex - minDistanceIndex]
+        mostLeft = currentPointCol
+        thumbPointDistance = 0
+        lastRow = max(palmprintBorder, key=lambda t: t[0])[0]
+        for distanceFromStartingPoint in range(1, len(palmprintBorder)):
+            nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            if nextBorderPointRow == lastRow:
+                break
+            if nextBorderPointCol < mostLeft:
+                mostLeft = nextBorderPointCol
+                thumbPointDistance = distanceFromStartingPoint
+            currentPointRow, currentPointCol = nextBorderPoint
 
-    #blockImage[endingPoint[0]][endingPoint[1]] = 0
+        for distanceFromStartingPoint in range(1, thumbPointDistance):
+            nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            pointsBetweenFingers.append(nextBorderPoint)
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = palmprintSegment
+
+        endingPoint = palmprintBorder[startingPointIndex + thumbPointDistance + 2]
+    # blockImage[endingPoint[0]][endingPoint[1]] = 0
 
     return endingPoint, pointsBetweenFingers, blockImage, blocks
+
+
+def flipPalmprint(image, blocks, blockImage):
+    imageHeight, imageWidth = image.shape
+    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
+
+    flippedImage = cv2.flip(image, 1)
+    flippedBlocks = copy.deepcopy(blocks)
+
+    blockImage = flippedImage.reshape(imageHeight // blockHeight, blockHeight, imageWidth // blockWidth, blockWidth)
+    blockImage = blockImage.swapaxes(1, 2)
+
+    for blockRow in range(blockRows):
+        for blockCol in range(blockCols):
+            flippedBlocks[blockRow][blockCol]["background"] = blocks[blockRow][blockCols - blockCol - 1]["background"]
+            flippedBlocks[blockRow][blockCol]["orientation"] = blocks[blockRow][blockCols - blockCol - 1]["orientation"]
+            flippedBlocks[blockRow][blockCol]["orientationConfidence"] = blocks[blockRow][blockCols - blockCol - 1][
+                "orientationConfidence"]
+            flippedBlocks[blockRow][blockCol]["palmprintSegment"] = blocks[blockRow][blockCols - blockCol - 1][
+                "palmprintSegment"]
+            flippedBlocks[blockRow][blockCol]["triradiusRegion"] = blocks[blockRow][blockCols - blockCol - 1][
+                "triradiusRegion"]
+
+    """ Najde vsetky hranice pozadia a odtlacku """
+    palmprintMask = np.zeros((blockRows, blockCols), dtype=np.uint8)
+
+    """ Najde masku odtlacku dlane """
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if flippedBlocks[row][col]["background"] == 0:
+                palmprintMask[row][col] = 1
+
+    """ Najde to kontury odtlacku (pozadie vo vnutri odtlacku ignoruje) """
+    palmprintBorder, blockImage, contour = findPalmprintBorder(palmprintMask, blockImage)
+
+    """ Najde konceky prstov a body medzi prstami """
+    fingerTips, pointsBetweenFingers = findFingerPoints(palmprintMask, contour)
+
+    return flippedImage, flippedBlocks, blockImage, fingerTips, pointsBetweenFingers, palmprintBorder, palmprintMask
 
 
 def detectPalmprint(blockImage, blocks, image):
@@ -560,7 +641,7 @@ def detectPalmprint(blockImage, blocks, image):
                 palmprintMask[row][col] = 1
 
     """ Spodok dlane to oreze, aby jej sirka bola apson 25 pixelov """
-    for row in range(blockRows):
+    """for row in range(blockRows):
         length = 0
         firstFound = False
         secondFound = False
@@ -573,9 +654,29 @@ def detectPalmprint(blockImage, blocks, image):
         if firstFound and length <= 25:
             for col in range(blockCols):
                 palmprintMask[blockRows - row - 1][col] = 0
+                blocks[blockRows - row - 1][col]["background"] = 1
         if firstFound and length >= 25:
+            break"""
+
+    """ Spodok dlane to oreze, aby jej sirka bola apson 25 pixelov """
+    lastRow = blockRows
+    for row in range(blockRows):
+        length = 0
+        firstFound = False
+        for col in range(blockCols):
+            if palmprintMask[blockRows - row - 1][col] == 0 and firstFound:
+                break
+            if palmprintMask[blockRows - row - 1][col] == 1:
+                firstFound = True
+                length += 1
+        if firstFound and length >= 25:
+            lastRow = blockRows - row - 1
             break
 
+    for row in range(lastRow + 3, blockRows):
+        for col in range(blockCols):
+            palmprintMask[row][col] = 0
+            blocks[row][col]["background"] = 1
 
     """ Najde to kontury odtlacku (pozadie vo vnutri odtlacku ignoruje) """
     palmprintBorder, blockImage, contour = findPalmprintBorder(palmprintMask, blockImage)
@@ -604,66 +705,13 @@ def detectPalmprint(blockImage, blocks, image):
     """ Najde konceky prstov a body medzi prstami """
     fingerTips, pointsBetweenFingers = findFingerPoints(palmprintMask, contour)
 
-    handOrientation = findHandOrientation(fingerTips)
+    """for fingerPoint in fingerTips:
+        blockImage[fingerPoint[0]][fingerPoint[1]] = 100
 
+    for fingerPoint in pointsBetweenFingers:
+        blockImage[fingerPoint[0]][fingerPoint[1]] = 100
 
-    if handOrientation == "Right":
-        if len(pointsBetweenFingers) == 4:
-            """ Najdenie hranice medzi prstom 2 a 3 (ukazovak a prostrednik), najdenie bodu na druhej strane 
-                ukazovaka a odstrihnutie ukazovaka"""
-            blocks, between23 = findBorderBetweenFingers(palmprintBorder, pointsBetweenFingers[1], blocks, 11)
-            leftPointOfFinger2, blocks = findPointOnTheOtherSideOfFinger(between23[0], palmprintBorder, blocks, False, 13)
-            blocks, palmprintBorder, palmprintMask = cutFinger(between23[0], leftPointOfFinger2, palmprintBorder,
-                                                                   palmprintMask, blockImage, blocks)
-
-            """ Najdenie hranice medzi prstom 3 a 4 (prostrednik a prstenik), a odstrihnutie prostrednika """
-            blocks, between34 = findBorderBetweenFingers(palmprintBorder, pointsBetweenFingers[2], blocks, 9)
-            blocks, palmprintBorder, palmprintMask = cutFinger(between34[0], between23[-1], palmprintBorder,
-                                                                   palmprintMask, blockImage, blocks)
-
-            """ Najdenie hranice medzi prstom 4 a 5 (prstenik a malicek), a odstrihnutie prstenika """
-            blocks, between45 = findBorderBetweenFingers(palmprintBorder, pointsBetweenFingers[3], blocks, 7)
-            blocks, palmprintBorder, palmprintMask = cutFinger(between45[0], between34[-1], palmprintBorder,
-                                                                   palmprintMask, blockImage, blocks)
-
-            """ Najdenie druhej strany malicka a odstrihnutie malicka """
-            rightPointOfFinger5, blocks = findPointOnTheOtherSideOfFinger(between45[-1], palmprintBorder,
-                                                                              blocks, True, 5)
-            blocks, palmprintBorder, palmprintMask = cutFinger(rightPointOfFinger5, between45[-1], palmprintBorder,
-                                                                   palmprintMask, blockImage, blocks)
-
-            """ Najdenie oboch stran palca a jeho odstrihnutie """
-            bottomPointOfThumb, between12, blockImage, blocks = findPointsBetweenThumb(leftPointOfFinger2, palmprintBorder,
-                                                                               blockImage, blocks, False, 13)
-            blocks, palmprintBorder, palmprintMask = cutFinger(between12[-1], bottomPointOfThumb, palmprintBorder,
-                                                                   palmprintMask, blockImage, blocks)
-
-            """ Vyplnenie medzi dolnym bodom palca a spodkom dlane """
-            startingPointIndex = palmprintBorder.index(bottomPointOfThumb)
-            startingPointRow, startingPointCol = bottomPointOfThumb
-            for distanceFromStartingPoint in range(1, 22):
-                nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
-                nextBorderPointRow, nextBorderPointCol = nextBorderPoint
-                pointsBetweenFingers.append(nextBorderPoint)
-                # blockImage[nextBorderPointRow][nextBorderPointCol] = 0
-                blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 1
-                currentPointRow, currentPointCol = nextBorderPoint
-
-            """ Vyplnenie medzi pravym bodom malicka a spodkom dlane """
-            startingPointIndex = palmprintBorder.index(rightPointOfFinger5)
-            startingPointRow, startingPointCol = rightPointOfFinger5
-            for distanceFromStartingPoint in range(1, 38):
-                nextBorderPoint = palmprintBorder[startingPointIndex - distanceFromStartingPoint]
-                nextBorderPointRow, nextBorderPointCol = nextBorderPoint
-                pointsBetweenFingers.append(nextBorderPoint)
-                # blockImage[nextBorderPointRow][nextBorderPointCol] = 0
-                blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 5
-                currentPointRow, currentPointCol = nextBorderPoint
-
-    for borderPoint in palmprintBorder:
-        blocks[borderPoint[0]][borderPoint[1]]["background"] = 2
-
-    """image = mergeBlocksToImage(blockImage)
+    image = mergeBlocksToImage(blockImage)
 
     scale_percent = 15  # percent of original size
     imageHeight, imageWidth = image.shape
@@ -680,9 +728,153 @@ def detectPalmprint(blockImage, blocks, image):
     cv2.destroyAllWindows()
 
     exit(2)"""
-    #findFingerTips(palmprintMask, palmprintBorder, blockImage, contour)
 
-    return blocks, blockImage, leftPointOfFinger2, between23, between34, between45, rightPointOfFinger5
+    handOrientation, thumbDetected = findHandOrientation(fingerTips, pointsBetweenFingers[0])
+
+    print(handOrientation)
+
+    if handOrientation == "Left":
+        image, blocks, blockImage, fingerTips, pointsBetweenFingers, palmprintBorder, palmprintMask = flipPalmprint(
+            image, blocks, blockImage)
+
+    """for borderPoint in palmprintBorder:
+        blockImage[borderPoint[0]][borderPoint[1]] = 0
+
+    image = mergeBlocksToImage(blockImage)
+
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
+
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
+
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    exit(2)"""
+
+    if len(pointsBetweenFingers) == 4 or len(pointsBetweenFingers) == 3:
+        if len(pointsBetweenFingers) == 4:
+            pointsBetweenFingers.pop(0)
+        """ Najdenie hranice medzi prstom 2 a 3 (ukazovak a prostrednik), najdenie bodu na druhej strane 
+            ukazovaka a odstrihnutie ukazovaka"""
+        blocks, between23 = findBorderBetweenFingers(palmprintBorder, pointsBetweenFingers[0], blocks, 11)
+        leftPointOfFinger2, blocks = findPointOnTheOtherSideOfFinger(between23[0], palmprintBorder, blocks, False,
+                                                                         13)
+        blocks, palmprintBorder, palmprintMask = cutFinger(between23[0], leftPointOfFinger2, palmprintBorder,
+                                                               palmprintMask, blockImage, blocks)
+
+        """ Najdenie hranice medzi prstom 3 a 4 (prostrednik a prstenik), a odstrihnutie prostrednika """
+        blocks, between34 = findBorderBetweenFingers(palmprintBorder, pointsBetweenFingers[1], blocks, 9)
+        blocks, palmprintBorder, palmprintMask = cutFinger(between34[0], between23[-1], palmprintBorder,
+                                                               palmprintMask, blockImage, blocks)
+
+        """ Najdenie hranice medzi prstom 4 a 5 (prstenik a malicek), a odstrihnutie prstenika """
+        blocks, between45 = findBorderBetweenFingers(palmprintBorder, pointsBetweenFingers[2], blocks, 7)
+        blocks, palmprintBorder, palmprintMask = cutFinger(between45[0], between34[-1], palmprintBorder,
+                                                               palmprintMask, blockImage, blocks)
+
+        """ Najdenie druhej strany malicka a odstrihnutie malicka """
+        rightPointOfFinger5, blocks = findPointOnTheOtherSideOfFinger(between45[-1], palmprintBorder,
+                                                                          blocks, True, 5)
+        blocks, palmprintBorder, palmprintMask = cutFinger(rightPointOfFinger5, between45[-1], palmprintBorder,
+                                                               palmprintMask, blockImage, blocks)
+
+        """ Najdenie oboch stran palca a jeho odstrihnutie """
+        bottomPointOfThumb, between12, blockImage, blocks = findPointsBetweenThumb(leftPointOfFinger2,
+                                                                                       palmprintBorder,
+                                                                                       blockImage, blocks, False, 13,
+                                                                                       thumbDetected)
+        if thumbDetected:
+            blocks, palmprintBorder, palmprintMask = cutFinger(between12[-1], bottomPointOfThumb, palmprintBorder,
+                                                                   palmprintMask, blockImage, blocks)
+
+        lastRow = max(palmprintBorder, key=lambda t: t[0])[0]
+        """ Vyplnenie medzi dolnym bodom palca a spodkom dlane """
+        startingPointIndex = palmprintBorder.index(bottomPointOfThumb)
+        currentPointRow, currentPointCol = bottomPointOfThumb
+        for distanceFromStartingPoint in range(1, len(palmprintBorder)):
+            nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            if currentPointRow == nextBorderPointRow and nextBorderPointRow > lastRow - 3:
+                break
+            pointsBetweenFingers.append(nextBorderPoint)
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 1
+            currentPointRow, currentPointCol = nextBorderPoint
+        bottomPointOfSegment1 = currentPointRow, currentPointCol
+
+        """ Vyplnenie medzi pravym bodom malicka a spodkom dlane """
+        startingPointIndex = palmprintBorder.index(rightPointOfFinger5)
+        currentPointRow, currentPointCol = rightPointOfFinger5
+        for distanceFromStartingPoint in range(1, len(palmprintBorder)):
+            nextBorderPoint = palmprintBorder[startingPointIndex - distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            if currentPointRow == nextBorderPointRow and nextBorderPointRow > lastRow - 3:
+                break
+            pointsBetweenFingers.append(nextBorderPoint)
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 5
+            currentPointRow, currentPointCol = nextBorderPoint
+        bottomPointOfSegment3 = currentPointRow, currentPointCol
+
+        firstUlnarRow = rightPointOfFinger5[0]
+        lastUlnarRow = currentPointRow
+        middleUlnarRow = (firstUlnarRow + lastUlnarRow) // 2
+        for distanceFromStartingPoint in range(1, len(palmprintBorder)):
+            nextBorderPoint = palmprintBorder[startingPointIndex - distanceFromStartingPoint]
+            nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+            if nextBorderPointRow == lastUlnarRow:
+                break
+            elif nextBorderPointRow == middleUlnarRow + 1:
+                blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 4
+            elif nextBorderPointRow > middleUlnarRow + 1:
+                blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 3
+
+    for borderPoint in palmprintBorder:
+        blocks[borderPoint[0]][borderPoint[1]]["background"] = 2
+
+    leftOfFinger5 = max(between45, key=lambda t: t[1])
+    rightOfFinger4 = min(between45, key=lambda t: t[1])
+    leftOfFinger4 = max(between34, key=lambda t: t[1])
+    rightOfFinger3 = min(between34, key=lambda t: t[1])
+    leftOfFinger3 = max(between23, key=lambda t: t[1])
+    rightOfFinger2 = min(between23, key=lambda t: t[1])
+    topPointOfThumb = max(between12, key=lambda t: t[0])
+
+    edgePointsOfSegments = [bottomPointOfThumb, bottomPointOfSegment1, bottomPointOfSegment3, bottomPointOfSegment3,
+                            rightPointOfFinger5, rightPointOfFinger5, leftOfFinger5, rightOfFinger4, leftOfFinger4,
+                            rightOfFinger3, leftOfFinger3, rightOfFinger2, leftPointOfFinger2]
+
+    """for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["background"] != 0:
+                blockImage[row][col] = 0
+
+    image = mergeBlocksToImage(blockImage)
+
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
+
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
+
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    exit(2)"""
+    # findFingerTips(palmprintMask, palmprintBorder, blockImage, contour)
+
+    return image, blockImage, blocks, blockImage, leftPointOfFinger2, between23, between34, between45, \
+           rightPointOfFinger5, bottomPointOfSegment1, bottomPointOfSegment3, palmprintBorder, edgePointsOfSegments
 
 
 def mergeBlocksToImage(blockImage):
@@ -705,18 +897,25 @@ def showSegmentedPalmprint(blockImage, blocks):
         for col in range(blockCols):
             if blocks[row][col]["background"] == 1:
                 pass
-                #blockImage[row][col] = 0
+                # blockImage[row][col] = 0
             if blocks[row][col]["background"] == 2:
-                if blocks[row][col]["palmprintSegment"] > 0:
-                    #pass
-                    blockImage[row][col] = 0
+                if blocks[row][col]["palmprintSegment"] != 0:
+                    if blocks[row][col]["palmprintSegment"] == 4:
+                        blockImage[row][col] = 128
+                    elif blocks[row][col]["palmprintSegment"] == 55:
+                        blockImage[row][col] = 128
+                    elif blocks[row][col]["palmprintSegment"] == 1313:
+                        blockImage[row][col] = 128
+                    # pass
+                    else:
+                        blockImage[row][col] = 0
                 else:
-                    #pass
+                    # pass
                     blockImage[row][col] = 128
 
     image = mergeBlocksToImage(blockImage)
 
-    savePalmprintSegmented(image)
+    #savePalmprintSegmented(image)
 
     """ Zmensenie vystupu aby sa zmestil na obrazovku """
     scale_percent = 15  # percent of original size
@@ -745,13 +944,14 @@ def segmentationSmoothingFingers(blockImage, blocks):
                 bottomRow = min(row + 1, blockRows - 1)
                 belowBottom = min(row + 2, blockRows - 1)
 
-                if blocks[topRow][col]["background"] == 0 and (blocks[bottomRow][col]["background"] == 0 or blocks[belowBottom][col]["background"] == 0):
+                if blocks[topRow][col]["background"] == 0 and (
+                        blocks[bottomRow][col]["background"] == 0 or blocks[belowBottom][col]["background"] == 0):
                     blocks[row][col]["background"] = 0
 
     return blocks
 
 
-def segmentation(blockImage, blocks, image):
+def segmentation(blockImage, blocks, image, directoryName):
     blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
     totalPixels = blockHeight * blockWidth
 
@@ -767,15 +967,18 @@ def segmentation(blockImage, blocks, image):
                 blocks[row][col]["background"] = 1
 
     """ Vyhladenie prebehne 3-krat po sebe (mozno sa na to neskor pozriet) --> pre novy dataset zatial netreba """
-    #for segmentationPhase in range(3):
+    # for segmentationPhase in range(3):
     blocks = segmentationSmoothingFingers(blockImage, blocks)
-    #blocks = segmentationSmoothing(blockImage, blocks)
+    # blocks = segmentationSmoothing(blockImage, blocks)
 
     """ Tu to funguje tak ze ked poslem blockImage do funkcie a v nej to prefarbim ta aj ked blockImage nevratim 
         z funkcie tak sa farba ulozi...takze potom zmenit (ked poslem segmentedImage ta OK)"""
     # segmentedImage = blockImage.copy()
-    blocks, blockImage, leftOfFinger2, between23, between34, between45, rightOfFinger5 = detectPalmprint(blockImage, blocks, image)
+    image, blockImage, blocks, blockImage, leftOfFinger2, between23, between34, between45, rightOfFinger5, \
+    bottomPointOfSegment1, bottomPointOfSegment3, palmprintBorder, edgePointsOfSegments = detectPalmprint(blockImage, blocks, image)
 
     showSegmentedPalmprint(blockImage, blocks)
+    #saveSegmentedPalmprint(image, directoryName)
 
-    return blocks, leftOfFinger2, between23, between34, between45, rightOfFinger5
+    return image, blockImage, blocks, leftOfFinger2, between23, between34, between45, rightOfFinger5, \
+           bottomPointOfSegment1, bottomPointOfSegment3, palmprintBorder, edgePointsOfSegments

@@ -5,19 +5,46 @@ from collections import Counter
 from timeit import default_timer as timer
 
 
+def mergeBlocksToImage(blockImage):
+    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
+    imageHeight = blockRows * blockHeight
+    imageWidth = blockCols * blockWidth
+
+    """ Spojenie blokov do celkoveho obrazu"""
+    image = blockImage.reshape(imageHeight // blockHeight, imageWidth // blockWidth, blockHeight, blockWidth)
+    image = image.swapaxes(1, 2).reshape(imageHeight, imageWidth)
+
+    return image
+
+
 def showPalmprint(image):
     cv2.imshow('image', image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
-def savePalmprint(image):
-    cv2.imwrite('orientationPalmprint.bmp', image)
+def savePalmprint(image, directoryName):
+    cv2.imwrite(f'{directoryName}/orientation.bmp', image)
 
 
-def saveOrientationsImage(image, blockImage, blocks, angles):
+def saveOrientationsImage(image, blockImage, blocks, angles, directoryName):
     blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
-    drawBlock = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+    """for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["orientationConfidence"] != 100:
+                blockImage[row][col] = 0
+
+    image = mergeBlocksToImage(blockImage)
+
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            if i % 50 == 0 or j % 50 == 0:
+                image[i][j] = 255
+            if i % 498 == 0 or i % 499 == 0 or i % 500 == 0 or i % 501 == 0 or i % 502 == 0 or j % 498 == 0 or j % 499 == 0 or j % 500 == 0 or j % 501 == 0 or j % 502 == 0:
+                image[i][j] = 255"""
+
+    orientationImage = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
     for row in range(blockRows):
         for col in range(blockCols):
@@ -36,9 +63,9 @@ def saveOrientationsImage(image, blockImage, blocks, angles):
                 x2 = int(centerX + (10 * math.cos(angle - math.pi)))
                 y2 = int(centerY + (10 * math.sin(angle - math.pi)))
 
-                drawBlock = cv2.line(drawBlock, (x2, y), (x, y2), (0, 0, 255), 2)
+                orientationImage = cv2.line(orientationImage, (x2, y), (x, y2), (0, 0, 255), 2)
 
-    savePalmprint(drawBlock)
+    savePalmprint(orientationImage, directoryName)
 
 
 def splitIntoParts(value, numberOfParts):
@@ -210,7 +237,7 @@ def findPixelsForRadonTransform(blockHeight, blockWidth, angles):
     return pixelsForRadonTransform
 
 
-def orientationField(blockImage, blocks, image):
+def orientationField(blockImage, blocks, image, directoryName):
     blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
     angles = splitIntoParts(math.pi, 12)
 
@@ -219,7 +246,7 @@ def orientationField(blockImage, blocks, image):
     end1 = timer()
     print(f"Najdenie pixelov pre RadonTransform: {end1 - start1}")
 
-    blocksAmount = 300
+    blocksAmount = 50000
     out = False
 
     for blockRow in range(blockRows):
@@ -248,21 +275,27 @@ def orientationField(blockImage, blocks, image):
                 #end2 = timer()
                 #print(f"Radon Transform All: {end2 - start2}")
 
-                #print(Counter(pixelOrientations))
+                print(Counter(pixelOrientations))
                 #start3 = timer()
+                confidence = 0
                 try:
                     finalOrientation = Counter(pixelOrientations).most_common()[0][0]
-                    """firstOrientation = Counter(pixelOrientations).most_common()[0][0]
+                    firstOrientation = Counter(pixelOrientations).most_common()[0][0]
                     firstOrientationNumber = Counter(pixelOrientations).most_common()[0][1]
                     secondOrientation = Counter(pixelOrientations).most_common()[1][0]
                     secondOrientationNumber = Counter(pixelOrientations).most_common()[1][1]
-                    if abs(firstOrientation - secondOrientation) > 1:
-                        if firstOrientationNumber > 2*secondOrientationNumber:
-                            finalOrientation = firstOrientation
+                    if abs(firstOrientation - secondOrientation) == 1:
+                        #finalOrientation = firstOrientation
+                        if firstOrientationNumber + secondOrientationNumber >= 150:
+                            confidence = 100
                         else:
-                            finalOrientation = -1
+                            confidence = 50
                     else:
-                        finalOrientation = firstOrientation"""
+                        if firstOrientationNumber >= 2 * secondOrientationNumber and firstOrientationNumber >= 100:
+                            confidence = 100
+                            #finalOrientation = firstOrientation
+                        else:
+                            confidence = ((firstOrientationNumber / secondOrientationNumber) - 1) * 100
                 except IndexError:
                     finalOrientation = -1
 
@@ -272,6 +305,7 @@ def orientationField(blockImage, blocks, image):
                 #showPalmprint(block)
 
                 blocks[blockRow][blockCol]["orientation"] = finalOrientation
+                blocks[blockRow][blockCol]["orientationConfidence"] = confidence
                 print(f"{blockRow}:{blockCol} --> {finalOrientation}")
                 blocksAmount -= 1
         if out:
@@ -279,6 +313,6 @@ def orientationField(blockImage, blocks, image):
 
     print("end")
 
-    saveOrientationsImage(image, blockImage, blocks, angles)
+    saveOrientationsImage(image, blockImage, blocks, angles, directoryName)
 
     return blocks, angles

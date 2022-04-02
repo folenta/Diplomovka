@@ -3,6 +3,9 @@
 import math
 from typing import List
 from timeit import default_timer as timer
+import matplotlib.pyplot as plt
+from sklearn.cluster import AgglomerativeClustering
+import os
 
 import cv2
 import numpy as np
@@ -29,6 +32,136 @@ from segmentation import segmentation, showSegmentedPalmprint
 """
 
 
+def saveSmoothingPalmprint(image):
+    cv2.imwrite('afterSmoothing.bmp', image)
+
+
+def saveOrientationsImage(image, blockImage, blocks, angles):
+    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
+
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["orientationConfidence"] != 100:
+                blockImage[row][col] = 0
+
+    image = mergeBlocksToImage(blockImage)
+
+    drawBlock = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["orientation"] != -1:
+                angle = angles[blocks[row][col]["orientation"]]
+
+                centerXX = blockWidth // 2
+                centerYY = blockHeight // 2
+
+                centerY = (row * blockWidth) + centerXX
+                centerX = (col * blockWidth) + centerYY
+
+                x = int(centerX + (10 * math.cos(angle)))
+                y = int(centerY + (10 * math.sin(angle)))
+
+                x2 = int(centerX + (10 * math.cos(angle - math.pi)))
+                y2 = int(centerY + (10 * math.sin(angle - math.pi)))
+
+                drawBlock = cv2.line(drawBlock, (x2, y), (x, y2), (0, 0, 255), 2)
+
+    saveSmoothingPalmprint(drawBlock)
+
+
+    """ Vsetkym pixelom v pozadi nastavi hodnotu 0 """
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["background"] == 1:
+                pass
+                # blockImage[row][col] = 0
+            if blocks[row][col]["background"] == 2:
+                if blocks[row][col]["palmprintSegment"] > 0:
+                    if blocks[row][col]["palmprintSegment"] == 4:
+                        blockImage[row][col] = 100
+                    # pass
+                    else:
+                        blockImage[row][col] = 0
+                else:
+                    # pass
+                    blockImage[row][col] = 128
+
+    image = mergeBlocksToImage(blockImage)
+
+    """ Zmensenie vystupu aby sa zmestil na obrazovku """
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
+
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
+
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+def saveSegmentedPalmprint(blockImage, blocks, directoryName):
+    blockRows, blockCols, _, _ = blockImage.shape
+
+    """ Vsetkym pixelom v pozadi nastavi hodnotu 0 """
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["background"] == 1:
+                pass
+                # blockImage[row][col] = 0
+            if blocks[row][col]["background"] == 2:
+                if blocks[row][col]["palmprintSegment"] != 0:
+                    if blocks[row][col]["palmprintSegment"] == 4:
+                        blockImage[row][col] = 128
+                    elif blocks[row][col]["palmprintSegment"] == 55:
+                        blockImage[row][col] = 128
+                    elif blocks[row][col]["palmprintSegment"] == 1313:
+                        blockImage[row][col] = 128
+                    # pass
+                    else:
+                        blockImage[row][col] = 0
+                else:
+                    # pass
+                    blockImage[row][col] = 128
+
+    image = mergeBlocksToImage(blockImage)
+
+    cv2.imwrite(f'{directoryName}/segmented.bmp', image)
+
+
+def saveOrientationAfterSmoothing(blockImage, blocks, angles, directoryName):
+    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
+    image = mergeBlocksToImage(blockImage)
+
+    orientationImage = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["orientation"] != -1:
+                angle = angles[blocks[row][col]["orientation"]]
+
+                centerXX = blockWidth // 2
+                centerYY = blockHeight // 2
+
+                centerY = (row * blockWidth) + centerXX
+                centerX = (col * blockWidth) + centerYY
+
+                x = int(centerX + (10 * math.cos(angle)))
+                y = int(centerY + (10 * math.sin(angle)))
+
+                x2 = int(centerX + (10 * math.cos(angle - math.pi)))
+                y2 = int(centerY + (10 * math.sin(angle - math.pi)))
+
+                orientationImage = cv2.line(orientationImage, (x2, y), (x, y2), (0, 0, 255), 2)
+
+    cv2.imwrite(f'{directoryName}/afterSmoothing.bmp', orientationImage)
+
+
 def loadPalmprint(fileName):
     image = cv2.imread(fileName, 0)
     return image
@@ -44,19 +177,25 @@ def savePalmprint(image):
     cv2.imwrite('newPalmprint.bmp', image)
 
 
-def saveTriradiusPalmprint(blockImage, triradiusA, triradiusB, triradiusC, triradiusD, mainLines):
-    image = mergeBlocksToImage(blockImage)
+def saveBlock(image):
+    cv2.imwrite('block.bmp', image)
 
-    image = cv2.circle(image, (triradiusA[1], triradiusA[0]), 10, (0, 0, 255), 3)
-    image = cv2.circle(image, (triradiusB[1], triradiusB[0]), 10, (0, 0, 255), 3)
-    image = cv2.circle(image, (triradiusC[1], triradiusC[0]), 10, (0, 0, 255), 3)
-    image = cv2.circle(image, (triradiusD[1], triradiusD[0]), 10, (0, 0, 255), 3)
+
+def saveTriradiusPalmprint(blockImage, triradiusA, triradiusB, triradiusC, triradiusD, triradiusT, mainLines, directoryName):
+    image = mergeBlocksToImage(blockImage)
+    triradiusImage = copy.deepcopy(image)
+
+    triradiusImage = cv2.circle(triradiusImage, (triradiusA[1], triradiusA[0]), 10, (0, 0, 255), 3)
+    triradiusImage = cv2.circle(triradiusImage, (triradiusB[1], triradiusB[0]), 10, (0, 0, 255), 3)
+    triradiusImage = cv2.circle(triradiusImage, (triradiusC[1], triradiusC[0]), 10, (0, 0, 255), 3)
+    triradiusImage = cv2.circle(triradiusImage, (triradiusD[1], triradiusD[0]), 10, (0, 0, 255), 3)
+    triradiusImage = cv2.circle(triradiusImage, (triradiusT[1], triradiusT[0]), 10, (0, 0, 255), 3)
 
     for mainLine in mainLines:
         for mainLinePoint in range(len(mainLine) - 1):
-            image = cv2.line(image, mainLine[mainLinePoint], mainLine[mainLinePoint + 1], (0, 0, 255), 3)
+            triradiusImage = cv2.line(triradiusImage, mainLine[mainLinePoint], mainLine[mainLinePoint + 1], (0, 0, 255), 3)
 
-    cv2.imwrite('triradiusPalmprint.bmp', image)
+    cv2.imwrite(f'{directoryName}/triradius.bmp', triradiusImage)
 
 
 def initializeBlocks(blockRows, blockColumns):
@@ -71,6 +210,9 @@ def initializeBlocks(blockRows, blockColumns):
             blocks[row][col]["orientation"] = -1
             blocks[row][col]["orientationConfidence"] = -1
             blocks[row][col]["palmprintSegment"] = 0
+            blocks[row][col]["triradiusRegion"] = 0
+            blocks[row][col]["frequency"] = 0
+            blocks[row][col]["ridgeWidth"] = 0
 
     return blocks
 
@@ -193,6 +335,118 @@ def getColCandidateForProjection(palmprintBlocksInColumn, firstCol, lastCol, ave
     return checkedColCandidates
 
 
+def getColCandidateForProjection2(topPointLeft, bottomPointLeft, topPointRight, bottomPointRight, blocks, left, blockImage):
+    colCandidates: list[int] = []
+    topRowLeft, topColLeft = topPointLeft
+    bottomRowLeft, bottomColLeft = bottomPointLeft
+
+    topRowRight, topColRight = topPointRight
+    bottomRowRight, bottomColRight = bottomPointRight
+
+    middleCol = (topColLeft + topColRight) // 2
+
+    if left:
+        firstCol = 0
+        middleRowLeft = (topRowLeft + bottomRowLeft) // 2
+        for col in range(topColLeft + 1, middleCol):
+            valid = True
+            firstCol = col
+            for row in range(topRowLeft + 8, middleRowLeft - 3):
+                #blockImage[row][col] = 100
+                if blocks[row][col]["background"] != 0:
+                    valid = False
+                    break
+            if valid:
+                break
+
+        """image = mergeBlocksToImage(blockImage)
+
+        scale_percent = 15  # percent of original size
+        imageHeight, imageWidth = image.shape
+
+        height = int(imageHeight * scale_percent / 100)
+        width = int(imageWidth * scale_percent / 100)
+        dim = (width, height)
+
+        # resize image
+        resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+        cv2.imshow('image', resized)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        exit(2)"""
+
+        for col in range(firstCol, middleCol):
+            colCandidates.append(col)
+
+        return colCandidates
+
+    else:
+        lastCol = 0
+        middleRowRight = (topRowRight + bottomRowRight) // 2
+        i = 0
+        for col in range(middleCol, topColRight):
+            valid = True
+            lastCol = topColRight - i
+            i += 1
+            for row in range(topRowRight + 8, middleRowRight - 3):
+                #blockImage[row][topColRight - i] = 100
+                if blocks[row][topColRight - i]["background"] != 0:
+                    valid = False
+                    #break
+            if valid:
+                break
+
+        """image = mergeBlocksToImage(blockImage)
+
+        scale_percent = 15  # percent of original size
+        imageHeight, imageWidth = image.shape
+
+        height = int(imageHeight * scale_percent / 100)
+        width = int(imageWidth * scale_percent / 100)
+        dim = (width, height)
+
+        # resize image
+        resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+        cv2.imshow('image', resized)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        exit(2)"""
+
+        for col in range(middleCol, lastCol):
+            colCandidates.append(col)
+
+        colCandidates.reverse()
+        return colCandidates
+
+    #middleCol = (lastCol + firstCol) // 2
+
+    #if left:
+        """ Aby mohol by stlpec kandidatom musi mat urcitu vysku (aspon 3/4 priemernej vysky odtlacku) """
+        #for index in range(firstCol, middleCol):
+            #if palmprintBlocksInColumn[index] > (averagePalmprintHeight * 0.75):
+               # colCandidates.append(index)
+
+    #else:
+        """ Aby mohol by stlpec kandidatom musi mat urcitu vysku (aspon 3/4 priemernej vysky odtlacku) """
+        #for index in range(middleCol, lastCol):
+            #if palmprintBlocksInColumn[index] > (averagePalmprintHeight * 0.75):
+                #colCandidates.append(index)
+
+        """ Pre pravu stranu odtlacku sa poradie stlpcov otoci """
+        #colCandidates.reverse()
+
+    """checkedColCandidates = []
+
+    for colCandidate in colCandidates:
+        ok = checkColCandidate(colCandidate, blocks)
+        if ok:
+            checkedColCandidates.append(colCandidate)
+
+    return checkedColCandidates"""
+
+
 def projectionSmoothing(sumIntensityInRow):
     step = 5
     smoothenedSumIntensityInRow = [0] * len(sumIntensityInRow)
@@ -216,12 +470,16 @@ def fillPrincipleLine(seed, blockImage, blocks, principleLinePoints):
 
     image = mergeBlocksToImage(blockImage)
 
-    whitePixelsMask = flood(image, seed, tolerance=40)
+    whitePixelsMask = flood(image, seed, tolerance=30)
 
     toSearch = [seed]
     alreadySearched = []
 
+    i = 0
     while toSearch:
+        i += 1
+        if i == 30000:
+            break
         seedRow, seedCol = toSearch.pop(0)
 
         if (seedRow, seedCol) in alreadySearched:
@@ -268,18 +526,26 @@ def findFirstAndLastBlockRow(blocks, colCandidate):
     return firstBlockRow, lastBlockRow
 
 
-def orientedProjection(image, blocks, blockImage, colCandidate):
+def orientedProjection(image, blocks, blockImage, colCandidate, topPoint, bottomPoint):
     blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
 
+    firstBlockRow = topPoint[0]
+    lastBlockRow = bottomPoint[0]
     """ Najdem prvy a posledny blok, ktory lezi v odtlacku v danom stlpci """
-    firstBlockRow, lastBlockRow = findFirstAndLastBlockRow(blocks, colCandidate)
+    #firstBlockRow, lastBlockRow = findFirstAndLastBlockRow(blocks, colCandidate)
 
     """ Vypocitam stred stlpca """
     middleBlockRow = (firstBlockRow + lastBlockRow) // 2
 
+    middleSearchRow = (middleBlockRow + firstBlockRow) // 2
+    quarterDistanceFromMiddleSearchRow = (middleSearchRow - firstBlockRow) // 2
+
     """ Najdem prvy a posledny riadok smerovej projekcie """
-    firstSearchRow = firstBlockRow * blockHeight
-    lastSearchRow = middleBlockRow * blockHeight
+    #firstSearchRow = (firstBlockRow + 8) * blockHeight
+    #lastSearchRow = (middleBlockRow - 5) * blockHeight
+
+    firstSearchRow = (middleSearchRow - quarterDistanceFromMiddleSearchRow) * blockHeight
+    lastSearchRow = (middleSearchRow + quarterDistanceFromMiddleSearchRow) * blockHeight
 
     """ Najdem prvy a posledny stlpec smerovej projekcie """
     firstSearchCol = colCandidate * blockWidth
@@ -308,45 +574,148 @@ def orientedProjection(image, blocks, blockImage, colCandidate):
 
 
 def orientedProjectionLeft(image, blocks, blockImage, palmprintBlocksInColumn, firstCol, lastCol,
-                           averagePalmprintHeight, principleLinePoints):
-    left = True
+                           averagePalmprintHeight, principleLinesPoints, colCandidatesForProjection, leftOfFinger2, bottomPointOfSegment1):
+    #left = True
 
     """ Vyberie stlpce v ktorych moze prebehnut smerova projekcia -  """
-    colCandidatesForProjection = getColCandidateForProjection(palmprintBlocksInColumn, firstCol, lastCol,
-                                                              averagePalmprintHeight, blocks, left)
+    #colCandidatesForProjection = getColCandidateForProjection(palmprintBlocksInColumn, firstCol, lastCol,
+     #                                                         averagePalmprintHeight, blocks, left)
 
     """ Vyberie druheho kandidata (prvy moze byt na hranici odtlacku) """
-    colCandidate = colCandidatesForProjection[1]
+    #colCandidate = colCandidatesForProjection[1]
 
     """ Vykonanie smerovej projekcie v danom stlpci """
-    pointOnPrincipleLine = orientedProjection(image, blocks, blockImage, colCandidate)
+    #pointOnPrincipleLine = orientedProjection(image, blocks, blockImage, colCandidate)
 
     """ Vyplnenie flekcnej ryhy """
-    principleLinesPoints = fillPrincipleLine(pointOnPrincipleLine, blockImage, blocks, principleLinePoints)
+    #principleLinesPoints = fillPrincipleLine(pointOnPrincipleLine, blockImage, blocks, principleLinePoints)
 
-    return principleLinesPoints
+    #return principleLinesPoints
+
+    _, _, blockHeight, blockWidth = blockImage.shape
+
+    principalPointSeeds = []
+    colorImage = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    for ind in range(0, min(len(colCandidatesForProjection), 11)):
+        """ Vyberie druheho kandidata (prvy moze byt na hranici odtlacku) """
+        colCandidate = colCandidatesForProjection[ind]
+
+        """ Vykonanie smerovej projekcie v danom stlpci """
+        pointOnPrincipleLine = orientedProjection(image, blocks, blockImage, colCandidate, leftOfFinger2, bottomPointOfSegment1)
+        principalPointSeeds.append(pointOnPrincipleLine)
+
+        for i in range(-5, 5):
+            for j in range(-5, 5):
+                colorImage[pointOnPrincipleLine[0] + i][pointOnPrincipleLine[1] + j] = (255, 0, 0)
+
+    pointRow = 0
+
+    found = False
+    for point in principalPointSeeds:
+        inOneLine = 0
+        pointRow = point[0]
+        for i in range(len(principalPointSeeds)):
+            if pointRow - 100 <= principalPointSeeds[i][0] <= pointRow + 200:
+                inOneLine += 1
+        if inOneLine >= 5:
+            found = True
+            break
+
+    if found:
+        principalLineRow = pointRow // blockHeight
+
+    else:
+        firstBlockRow = leftOfFinger2[0]
+        lastBlockRow = bottomPointOfSegment1[0]
+
+        """ Vypocitam stred stlpca """
+        middleBlockRow = (firstBlockRow + lastBlockRow) // 2
+
+        principalLineRow = (middleBlockRow + firstBlockRow) // 2
+
+    clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=100).fit(principalPointSeeds)
+    print(clustering.labels_)
+
+    savePalmprint(colorImage)
+
+    #savePalmprint(colorImage)
+    #exit(2)
+
+    #pointOnPrincipleLine = principalPointSeeds[5]
+
+    #for pointOnPrincipleLine in principalPointSeeds:
+        #""" Ked uz bod lezi v detekovanej flekcnej ryhe, nie je potrebne ju zase vyplnovat """
+        #if not principleLinesPoints[pointOnPrincipleLine[0]][pointOnPrincipleLine[1]]:
+            #""" Vyplnenie flekcnej ryhy """
+            #principleLinesPoints = fillPrincipleLine(pointOnPrincipleLine, blockImage, blocks, principleLinesPoints)
+
+    return principalLineRow
 
 
 def orientedProjectionRight(image, blocks, blockImage, palmprintBlocksInColumn, firstCol, lastCol,
-                            averagePalmprintHeight, principleLinesPoints):
-    left = False
+                            averagePalmprintHeight, principleLinesPoints, colCandidatesForProjection, rightOfFinger5,
+                            bottomPointOfSegment3):
+    _, _, blockHeight, blockWidth = blockImage.shape
+    #left = False
 
     """ Vyberie stlpce v ktorych moze prebehnut smerova projekcia -  """
-    colCandidatesForProjection = getColCandidateForProjection(palmprintBlocksInColumn, firstCol, lastCol,
-                                                              averagePalmprintHeight, blocks, left)
+    #colCandidatesForProjection = getColCandidateForProjection(palmprintBlocksInColumn, firstCol, lastCol,
+     #                                                         averagePalmprintHeight, blocks, left)
 
-    """ Vyberie druheho kandidata (prvy moze byt na hranici odtlacku) """
-    colCandidate = colCandidatesForProjection[1]
+    principalPointSeeds = []
+    colorImage = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    for ind in range(1, min(len(colCandidatesForProjection), 11)):
+        """ Vyberie druheho kandidata (prvy moze byt na hranici odtlacku) """
+        colCandidate = colCandidatesForProjection[ind]
 
-    """ Vykonanie smerovej projekcie v danom stlpci """
-    pointOnPrincipleLine = orientedProjection(image, blocks, blockImage, colCandidate)
+        """ Vykonanie smerovej projekcie v danom stlpci """
+        pointOnPrincipleLine = orientedProjection(image, blocks, blockImage, colCandidate, rightOfFinger5, bottomPointOfSegment3)
+        principalPointSeeds.append(pointOnPrincipleLine)
 
-    """ Ked uz bod lezi v detekovanej flekcnej ryhe, nie je potrebne ju zase vyplnovat """
-    if not principleLinesPoints[pointOnPrincipleLine[0]][pointOnPrincipleLine[1]]:
-        """ Vyplnenie flekcnej ryhy """
-        principleLinesPoints = fillPrincipleLine(pointOnPrincipleLine, blockImage, blocks, principleLinesPoints)
+        for i in range(-5, 5):
+            for j in range(-5, 5):
+                colorImage[pointOnPrincipleLine[0] + i][pointOnPrincipleLine[1] + j] = (255, 0, 0)
 
-    return principleLinesPoints
+    pointRow = 0
+
+    found = False
+    for point in principalPointSeeds:
+        inOneLine = 0
+        pointRow = point[0]
+        for i in range(len(principalPointSeeds)):
+            if pointRow - 200 <= principalPointSeeds[i][0] <= pointRow + 100:
+                inOneLine += 1
+        if inOneLine >= 5:
+            found = True
+            break
+
+    if found:
+        principalLineRow = (pointRow // blockHeight) + 1
+
+    else:
+        firstBlockRow = rightOfFinger5[0]
+        lastBlockRow = bottomPointOfSegment3[0]
+
+        """ Vypocitam stred stlpca """
+        middleBlockRow = (firstBlockRow + lastBlockRow) // 2
+
+        principalLineRow = (middleBlockRow + firstBlockRow) // 2
+
+    clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=200).fit(principalPointSeeds)
+    print(clustering.labels_)
+
+    #savePalmprint(colorImage)
+    #exit(2)
+
+    #pointOnPrincipleLine = principalPointSeeds[5]
+
+    #for pointOnPrincipleLine in principalPointSeeds:
+        #""" Ked uz bod lezi v detekovanej flekcnej ryhe, nie je potrebne ju zase vyplnovat """
+        #if not principleLinesPoints[pointOnPrincipleLine[0]][pointOnPrincipleLine[1]]:
+            #""" Vyplnenie flekcnej ryhy """
+            #principleLinesPoints = fillPrincipleLine(pointOnPrincipleLine, blockImage, blocks, principleLinesPoints)
+
+    return principalLineRow
 
 
 def checkRowCandidate(rowCandidate, blocks):
@@ -478,7 +847,7 @@ def orientedProjectionBottom(image, blocks, blockImage, palmprintBlocksInRow, fi
     return principleLinesPoints
 
 
-def principleLines(image, blocks, blockImage):
+def principleLines(image, blocks, blockImage, leftOfFinger2, bottomPointOfSegment1, rightOfFinger5, bottomPointOfSegment3, palmprintBorder, ):
     """ Pre kazdy stlpec/riadok najde pocet blokov, ktore patria do odtlacku """
     palmprintBlocksInRow, palmprintBlocksInColumn = getNumberOfPalmprintBlocks(blocks)
 
@@ -495,23 +864,64 @@ def principleLines(image, blocks, blockImage):
     principleLinesPoints = np.zeros((image.shape[0], image.shape[1]), np.uint8)
     principleLinesPoints = np.bool_(principleLinesPoints)
 
+    left = True
+
+    """ Vyberie stlpce v ktorych moze prebehnut smerova projekcia -  """
+    colCandidatesForProjection = getColCandidateForProjection2(leftOfFinger2, bottomPointOfSegment1, rightOfFinger5,
+                                                               bottomPointOfSegment3, blocks, left, blockImage)
+
     """ Smerova projekcia v lavej hornej polovici odtlacku """
-    principleLinesPoints = orientedProjectionLeft(image, blocks, blockImage, palmprintBlocksInColumn, firstCol, lastCol,
-                                                  averagePalmprintHeight, principleLinesPoints)
+    principleLineRow = orientedProjectionLeft(image, blocks, blockImage, palmprintBlocksInColumn, firstCol, lastCol,
+                                              averagePalmprintHeight, principleLinesPoints, colCandidatesForProjection,
+                                              leftOfFinger2, bottomPointOfSegment1)
+
+    startingPointIndex = palmprintBorder.index(leftOfFinger2)
+    for distanceFromStartingPoint in range(1, len(palmprintBorder)):
+        nextBorderPoint = palmprintBorder[startingPointIndex + distanceFromStartingPoint]
+        nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+        if blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] != 13:
+            break
+        if nextBorderPointRow == principleLineRow:
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 1313
+        if nextBorderPointRow < principleLineRow:
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = "13\'"
+        if nextBorderPointRow > principleLineRow:
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = "13\""
+
+    left = False
+
+    """ Vyberie stlpce v ktorych moze prebehnut smerova projekcia -  """
+    colCandidatesForProjection = getColCandidateForProjection2(leftOfFinger2, bottomPointOfSegment1, rightOfFinger5,
+                                                               bottomPointOfSegment3, blocks, left, blockImage)
 
     """ Smerova projekcia v pravej hornej polovici odtlacku """
-    principleLinesPoints = orientedProjectionRight(image, blocks, blockImage, palmprintBlocksInColumn, firstCol,
-                                                   lastCol, averagePalmprintHeight, principleLinesPoints)
+    principleLineRow = orientedProjectionRight(image, blocks, blockImage, palmprintBlocksInColumn, firstCol,
+                                                   lastCol, averagePalmprintHeight, principleLinesPoints, colCandidatesForProjection,
+                                                   rightOfFinger5, bottomPointOfSegment3)
 
+    startingPointIndex = palmprintBorder.index(rightOfFinger5)
+    for distanceFromStartingPoint in range(1, len(palmprintBorder)):
+        nextBorderPoint = palmprintBorder[startingPointIndex - distanceFromStartingPoint]
+        nextBorderPointRow, nextBorderPointCol = nextBorderPoint
+        if nextBorderPointRow == principleLineRow:
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = 55
+        if blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] == 4:
+            break
+        if nextBorderPointRow < principleLineRow:
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = "5\""
+        if nextBorderPointRow > principleLineRow:
+            blocks[nextBorderPointRow][nextBorderPointCol]["palmprintSegment"] = "5\'"
     """ Smerova projekcia v strednej dolnej polovici odtlacku """
-    principleLinesPoints = orientedProjectionBottom(image, blocks, blockImage, palmprintBlocksInRow, firstRow,
-                                                    lastRow, averagePalmprintWidth, principleLinesPoints)
+    """principleLinesPoints = orientedProjectionBottom(image, blocks, blockImage, palmprintBlocksInRow, firstRow,
+                                                    lastRow, averagePalmprintWidth, principleLinesPoints)"""
 
-    colorImage = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    """colorImage = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
     colorImage[principleLinesPoints] = (255, 0, 0)
 
     savePalmprint(colorImage)
+    exit(2)"""
+    return blocks
 
 
 def poincareIndex(blocks, possibleTriradiusBlocks, row, col, angles):
@@ -625,7 +1035,7 @@ def findOrientationsInTriradiusBlocks(blockHeight, blockWidth, blockImage, angle
     return triradiusRegion
 
 
-def localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage):
+def localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage, triradiusBlocksMask):
     _, _, blockHeight, blockWidth = blockImage.shape
     maxRow = 0
     maxCol = 0
@@ -637,8 +1047,11 @@ def localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow,
             right = triradiusRegion[blockRow][blockCol + 1]
             bottom = triradiusRegion[blockRow + 1][blockCol + 1]
             left = triradiusRegion[blockRow + 1][blockCol]
-            diff = 0
+            if triradiusBlocksMask[blockRow][blockCol] == 0 or triradiusBlocksMask[blockRow][blockCol + 1] == 0 or \
+                    triradiusBlocksMask[blockRow + 1][blockCol + 1] == 0 or triradiusBlocksMask[blockRow + 1][blockCol] == 0:
+                continue
 
+            diff = 0
             diff += min(abs(start - right), abs((start + 12) - right))
             diff += min(abs(right - bottom), abs((right + 12) - bottom))
             diff += min(abs(bottom - left), abs((bottom + 12) - left))
@@ -668,40 +1081,7 @@ def localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow,
     return triradius
 
 
-def detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23):
-    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
-    possibleTriradiusBlocks = []
-    leftOfFinger2Row, leftOfFinger2Col = leftOfFinger2
-    rightOfFinger2Row, rightOfFinger2Col = between23[(len(between23) // 2) - 1]
-
-    for row in range(leftOfFinger2Row + 1, leftOfFinger2Row + 8):
-        for col in range(leftOfFinger2Col, rightOfFinger2Col):
-            #blockImage[row][col] = 0
-            if blocks[row][col]["orientation"] != -1:
-                possibleTriradiusBlocks = poincareIndex(blocks, possibleTriradiusBlocks, row, col, angles)
-
-    """ Tota cast kodu vykresli mozne bloky v ktorych moze byt triradius bielou farbou """
-    triradiusBlocks = copy.deepcopy(blockImage)
-
-    for a in possibleTriradiusBlocks:
-        triradiusBlocks[a[0]][a[1]] = 255
-
-    image = mergeBlocksToImage(triradiusBlocks)
-
-    scale_percent = 15  # percent of original size
-    imageHeight, imageWidth = image.shape
-
-    height = int(imageHeight * scale_percent / 100)
-    width = int(imageWidth * scale_percent / 100)
-    dim = (width, height)
-
-    # resize image
-    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
-
-    cv2.imshow('image', resized)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
+def getMostProbableTriradiusRegion(possibleTriradiusBlocks, blockRows, blockCols, blockHeight, blockWidth):
     """ Tota cast kodu rozdeli mozne triradiove bloky na spojite zhluky """
     possibleTriradiusParts = []
 
@@ -739,7 +1119,84 @@ def detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23):
     """ Tota cast kodu skusi najst stvorec o velkosti 2x2 """
     if len(possibleTriradiusParts) == 1:
         triradiusPart = possibleTriradiusParts[0]
+        possibleTriradiusBlocks = copy.deepcopy(triradiusPart)
+        if len(triradiusPart) == 1:
+            triradiusBlock = triradiusPart[0]
+            triradiusX = (triradiusBlock[0] * blockRows) + (blockHeight // 2)
+            triradiusY = (triradiusBlock[1] * blockCols) + (blockWidth // 2)
 
+            # return triradiusX, triradiusY
+        else:
+            foundSquare = False
+            for blockInTriradiusPart in triradiusPart:
+                pointX, pointY = blockInTriradiusPart
+                if (pointX, pointY + 1) in triradiusPart and (pointX + 1, pointY + 1) in triradiusPart and \
+                        (pointX + 1, pointY) in triradiusPart:
+                    possibleTriradiusBlocks = [(pointX, pointY), (pointX, pointY + 1), (pointX + 1, pointY),
+                                               (pointX + 1, pointY + 1)]
+                    foundSquare = True
+                    break
+
+    else:
+        for triradiusPart in possibleTriradiusParts:
+            foundSquare = False
+            for blockInTriradiusPart in triradiusPart:
+                pointX, pointY = blockInTriradiusPart
+                if (pointX, pointY + 1) in triradiusPart and (pointX + 1, pointY + 1) in triradiusPart and \
+                        (pointX + 1, pointY) in triradiusPart:
+                    possibleTriradiusBlocks = [(pointX, pointY), (pointX, pointY + 1), (pointX + 1, pointY),
+                                               (pointX + 1, pointY + 1)]
+                    foundSquare = True
+                    break
+            if foundSquare:
+                break
+
+        if not foundSquare:
+            #biggestTriradiusRegion = max(len(triradiusPart) for triradiusPart in possibleTriradiusParts)
+            biggestTriradiusRegion = max(possibleTriradiusParts, key=len)
+            possibleTriradiusBlocks = copy.deepcopy(biggestTriradiusRegion)
+
+    return possibleTriradiusBlocks
+
+
+def detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23):
+    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
+    possibleTriradiusBlocks = []
+    leftOfFinger2Row, leftOfFinger2Col = leftOfFinger2
+    rightOfFinger2Row, rightOfFinger2Col = between23[(len(between23) // 2) - 1]
+
+    for row in range(leftOfFinger2Row + 1, leftOfFinger2Row + 8):
+        for col in range(leftOfFinger2Col, rightOfFinger2Col):
+            #blockImage[row][col] = 0
+            if blocks[row][col]["orientation"] != -1:
+                possibleTriradiusBlocks = poincareIndex(blocks, possibleTriradiusBlocks, row, col, angles)
+
+    if len(possibleTriradiusBlocks) == 0:
+        return (0, 0), blocks
+
+    """ Tota cast kodu vykresli mozne bloky v ktorych moze byt triradius bielou farbou """
+    """triradiusBlocks = copy.deepcopy(blockImage)
+
+    for a in possibleTriradiusBlocks:
+        triradiusBlocks[a[0]][a[1]] = 255
+
+    image = mergeBlocksToImage(triradiusBlocks)
+
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
+
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
+
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()"""
+
+    possibleTriradiusBlocks = getMostProbableTriradiusRegion(possibleTriradiusBlocks, blockRows, blockCols, blockHeight, blockWidth)
 
     """ Tota cast kodu ulozi obraz s moznymi blokmi v ktorych moze byt triradius bielou farbou """
     triradiusBlocks = copy.deepcopy(blockImage)
@@ -751,14 +1208,14 @@ def detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23):
 
     cv2.imwrite('triradiusPalmprint1.bmp', image)
 
-    return (0, 0)
-
-    # TODO najst iba jeden possible region
-
-    firstRow = possibleTriradiusBlocks[0][0]
-    lastRow = possibleTriradiusBlocks[-1][0]
+    firstRow = min(possibleTriradiusBlocks, key=lambda t: t[0])[0]
+    lastRow = max(possibleTriradiusBlocks, key=lambda t: t[0])[0]
     firstCol = min(possibleTriradiusBlocks, key=lambda t: t[1])[1]
     lastCol = max(possibleTriradiusBlocks, key=lambda t: t[1])[1]
+
+    for row in range(firstRow - 2, lastRow + 2):
+        for col in range(firstCol - 2, lastCol + 2):
+            blocks[row][col]["triradiusRegion"] = 1
 
     blocksInHeight = lastRow - firstRow + 1
     blocksInWidth = lastCol - firstCol + 1
@@ -766,14 +1223,24 @@ def detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23):
     smallBlockRows = blocksInHeight * blockHeight // 25
     smallBlockCols = blocksInWidth * blockWidth // 25
 
+    triradiusBlocksMask = [[0 for i in range(smallBlockCols)] for j in range(smallBlockRows)]
+
+    for row in range(blocksInWidth):
+        for col in range(blocksInWidth):
+            if (firstRow + row, firstCol + col) in possibleTriradiusBlocks:
+                triradiusBlocksMask[2*row][2*col] = 1
+                triradiusBlocksMask[2*row + 1][2*col] = 1
+                triradiusBlocksMask[2*row][2*col + 1] = 1
+                triradiusBlocksMask[2*row + 1][2*col + 1] = 1
+
     triradiusRegion = findOrientationsInTriradiusBlocks(blockHeight, blockWidth, blockImage, angles, smallBlockRows,
                                                         smallBlockCols, firstRow, firstCol)
 
     #blockImage = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
-    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
+    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage, triradiusBlocksMask)
 
     #return blockImage
-    return triradius
+    return triradius, blocks
 
 
 def detectTriradiusB(blocks, blockImage, angles, between23, between34):
@@ -788,9 +1255,15 @@ def detectTriradiusB(blocks, blockImage, angles, between23, between34):
             if blocks[row][col]["orientation"] != -1:
                 possibleTriradiusBlocks = poincareIndex(blocks, possibleTriradiusBlocks, row, col, angles)
 
+    if len(possibleTriradiusBlocks) == 0:
+        return (0, 0), blocks
+
+    possibleTriradiusBlocks = getMostProbableTriradiusRegion(possibleTriradiusBlocks, blockRows, blockCols, blockHeight,
+                                                             blockWidth)
+
     triradiusBlocks = copy.deepcopy(blockImage)
 
-    for a in possibleTriradiusBlocks:
+    """for a in possibleTriradiusBlocks:
         triradiusBlocks[a[0]][a[1]] = 255
 
     image = mergeBlocksToImage(triradiusBlocks)
@@ -809,20 +1282,16 @@ def detectTriradiusB(blocks, blockImage, angles, between23, between34):
 
     cv2.imshow('image', resized)
     cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    cv2.destroyAllWindows()"""
 
-    #showPalmprint(image)
-
-
-
-    return (0, 0)
-
-    # TODO najst iba jeden possible region
-
-    firstRow = possibleTriradiusBlocks[0][0]
-    lastRow = possibleTriradiusBlocks[-1][0]
+    firstRow = min(possibleTriradiusBlocks, key=lambda t: t[0])[0]
+    lastRow = max(possibleTriradiusBlocks, key=lambda t: t[0])[0]
     firstCol = min(possibleTriradiusBlocks, key=lambda t: t[1])[1]
     lastCol = max(possibleTriradiusBlocks, key=lambda t: t[1])[1]
+
+    for row in range(firstRow - 2, lastRow + 2):
+        for col in range(firstCol - 2, lastCol + 2):
+            blocks[row][col]["triradiusRegion"] = 1
 
     blocksInHeight = lastRow - firstRow + 1
     blocksInWidth = lastCol - firstCol + 1
@@ -830,14 +1299,24 @@ def detectTriradiusB(blocks, blockImage, angles, between23, between34):
     smallBlockRows = blocksInHeight * blockHeight // 25
     smallBlockCols = blocksInWidth * blockWidth // 25
 
+    triradiusBlocksMask = [[0 for i in range(smallBlockCols)] for j in range(smallBlockRows)]
+
+    for row in range(blocksInWidth):
+        for col in range(blocksInWidth):
+            if (firstRow + row, firstCol + col) in possibleTriradiusBlocks:
+                triradiusBlocksMask[2 * row][2 * col] = 1
+                triradiusBlocksMask[2 * row + 1][2 * col] = 1
+                triradiusBlocksMask[2 * row][2 * col + 1] = 1
+                triradiusBlocksMask[2 * row + 1][2 * col + 1] = 1
+
     triradiusRegion = findOrientationsInTriradiusBlocks(blockHeight, blockWidth, blockImage, angles, smallBlockRows,
                                                         smallBlockCols, firstRow, firstCol)
 
     # blockImage = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
-    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
+    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage, triradiusBlocksMask)
 
     # return blockImage
-    return triradius
+    return triradius, blocks
 
 
 def detectTriradiusD(blocks, blockImage, angles, between45, rightOfFinger5):
@@ -852,23 +1331,29 @@ def detectTriradiusD(blocks, blockImage, angles, between45, rightOfFinger5):
             if blocks[row][col]["orientation"] != -1:
                 possibleTriradiusBlocks = poincareIndex(blocks, possibleTriradiusBlocks, row, col, angles)
 
-    triradiusBlocks = copy.deepcopy(blockImage)
+    if len(possibleTriradiusBlocks) == 0:
+        return (0, 0), blocks
+
+    possibleTriradiusBlocks = getMostProbableTriradiusRegion(possibleTriradiusBlocks, blockRows, blockCols, blockHeight,
+                                                             blockWidth)
+
+    """triradiusBlocks = copy.deepcopy(blockImage)
 
     for a in possibleTriradiusBlocks:
         triradiusBlocks[a[0]][a[1]] = 255
 
     image = mergeBlocksToImage(triradiusBlocks)
 
-    cv2.imwrite('triradiusPalmprint3.bmp', image)
+    cv2.imwrite('triradiusPalmprint3.bmp', image)"""
 
-    return (0, 0)
-
-    # TODO najst iba jeden possible region
-
-    firstRow = possibleTriradiusBlocks[0][0]
-    lastRow = possibleTriradiusBlocks[-1][0]
+    firstRow = min(possibleTriradiusBlocks, key=lambda t: t[0])[0]
+    lastRow = max(possibleTriradiusBlocks, key=lambda t: t[0])[0]
     firstCol = min(possibleTriradiusBlocks, key=lambda t: t[1])[1]
     lastCol = max(possibleTriradiusBlocks, key=lambda t: t[1])[1]
+
+    for row in range(firstRow - 2, lastRow + 2):
+        for col in range(firstCol - 2, lastCol + 2):
+            blocks[row][col]["triradiusRegion"] = 1
 
     blocksInHeight = lastRow - firstRow + 1
     blocksInWidth = lastCol - firstCol + 1
@@ -876,14 +1361,147 @@ def detectTriradiusD(blocks, blockImage, angles, between45, rightOfFinger5):
     smallBlockRows = blocksInHeight * blockHeight // 25
     smallBlockCols = blocksInWidth * blockWidth // 25
 
+    triradiusBlocksMask = [[0 for i in range(smallBlockCols)] for j in range(smallBlockRows)]
+
+    for row in range(blocksInWidth):
+        for col in range(blocksInWidth):
+            if (firstRow + row, firstCol + col) in possibleTriradiusBlocks:
+                triradiusBlocksMask[2 * row][2 * col] = 1
+                triradiusBlocksMask[2 * row + 1][2 * col] = 1
+                triradiusBlocksMask[2 * row][2 * col + 1] = 1
+                triradiusBlocksMask[2 * row + 1][2 * col + 1] = 1
+
     triradiusRegion = findOrientationsInTriradiusBlocks(blockHeight, blockWidth, blockImage, angles, smallBlockRows,
                                                         smallBlockCols, firstRow, firstCol)
 
     # blockImage = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
-    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
+    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage, triradiusBlocksMask)
 
     # return blockImage
-    return triradius
+    return triradius, blocks
+
+
+def detectTriradiusT(blocks, blockImage, angles):
+    blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
+    lastRow = 0
+    firstCol = 0
+    lastCol = 0
+
+    """ Najde posledny riadok odtlacku """
+    foundLastRow = False
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[blockRows - row - 1][col]["background"] != 1:
+                lastRow = blockRows - row - 1
+                foundLastRow = True
+                break
+        if foundLastRow:
+            break
+
+    foundFirstCol = False
+    for col in range(blockCols):
+        if not foundFirstCol:
+            if blocks[lastRow][col]["background"] != 1:
+                firstCol = col
+                foundFirstCol = True
+        else:
+            if blocks[lastRow][col]["background"] != 1:
+                lastCol = col
+
+    middleCol = (firstCol + lastCol) // 2
+    firstSearchCol = middleCol
+    lastSearchCol = ((middleCol + lastCol) // 2) + 2
+    firstSearchRow = lastRow - 12
+    lastSearchRow = lastRow
+
+    """for row in range(firstSearchRow, lastSearchRow):
+            for col in range(firstSearchCol, lastSearchCol):
+                blockImage[row][col] = 0
+
+        image = mergeBlocksToImage(blockImage)
+
+        savePalmprint(image)
+        exit(2)"""
+
+    possibleTriradiusBlocks = []
+
+    for row in range(firstSearchRow, lastSearchRow):
+        for col in range(firstSearchCol, lastSearchCol):
+            #blockImage[row][col] = 0
+            if blocks[row][col]["orientation"] != -1:
+                possibleTriradiusBlocks = poincareIndex(blocks, possibleTriradiusBlocks, row, col, angles)
+
+    if len(possibleTriradiusBlocks) == 0:
+        return (0, 0), blocks
+
+    """ Tota cast kodu vykresli mozne bloky v ktorych moze byt triradius bielou farbou """
+    """triradiusBlocks = copy.deepcopy(blockImage)
+
+    for a in possibleTriradiusBlocks:
+        triradiusBlocks[a[0]][a[1]] = 255
+
+    image = mergeBlocksToImage(triradiusBlocks)
+
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
+
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
+
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()"""
+
+    possibleTriradiusBlocks = getMostProbableTriradiusRegion(possibleTriradiusBlocks, blockRows, blockCols, blockHeight, blockWidth)
+
+    """ Tota cast kodu ulozi obraz s moznymi blokmi v ktorych moze byt triradius bielou farbou """
+    triradiusBlocks = copy.deepcopy(blockImage)
+
+    for a in possibleTriradiusBlocks:
+        triradiusBlocks[a[0]][a[1]] = 255
+
+    image = mergeBlocksToImage(triradiusBlocks)
+
+    cv2.imwrite('triradiusPalmprintT.bmp', image)
+
+    firstRow = min(possibleTriradiusBlocks, key=lambda t: t[0])[0]
+    lastRow = max(possibleTriradiusBlocks, key=lambda t: t[0])[0]
+    firstCol = min(possibleTriradiusBlocks, key=lambda t: t[1])[1]
+    lastCol = max(possibleTriradiusBlocks, key=lambda t: t[1])[1]
+
+    for row in range(firstRow - 2, lastRow + 2):
+        for col in range(firstCol - 2, lastCol + 2):
+            blocks[row][col]["triradiusRegion"] = 1
+
+    blocksInHeight = lastRow - firstRow + 1
+    blocksInWidth = lastCol - firstCol + 1
+
+    smallBlockRows = blocksInHeight * blockHeight // 25
+    smallBlockCols = blocksInWidth * blockWidth // 25
+
+    triradiusBlocksMask = [[0 for i in range(smallBlockCols)] for j in range(smallBlockRows)]
+
+    for row in range(blocksInWidth):
+        for col in range(blocksInWidth):
+            if (firstRow + row, firstCol + col) in possibleTriradiusBlocks:
+                triradiusBlocksMask[2 * row][2 * col] = 1
+                triradiusBlocksMask[2 * row + 1][2 * col] = 1
+                triradiusBlocksMask[2 * row][2 * col + 1] = 1
+                triradiusBlocksMask[2 * row + 1][2 * col + 1] = 1
+
+    triradiusRegion = findOrientationsInTriradiusBlocks(blockHeight, blockWidth, blockImage, angles, smallBlockRows,
+                                                        smallBlockCols, firstRow, firstCol)
+
+    # blockImage = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage)
+    triradius = localizeTriradius(triradiusRegion, smallBlockRows, smallBlockCols, firstRow, firstCol, blockImage,
+                                  triradiusBlocksMask)
+
+    # return blockImage
+    return triradius, blocks
 
 
 def comingFromWhere(x, y, nextX, nextY):
@@ -912,7 +1530,240 @@ def comingFromWhere(x, y, nextX, nextY):
     return comingFromNew
 
 
-def getNextPoint(comingFrom, orientation, sinOfAngles, cosOfAngles, x, y):
+def calculateSinOfAngles5(angles):
+    sinOfAngles = []
+    fiveDegrees = math.radians(5)
+
+    for angle in angles:
+        sinOfAngles.append(math.sin(angle - fiveDegrees))
+
+    return sinOfAngles
+
+
+def calculateCosOfAngles5(angles):
+    cosOfAngles = []
+    fiveDegrees = math.radians(5)
+
+    for angle in angles:
+        cosOfAngles.append(math.cos(angle - fiveDegrees))
+
+    return cosOfAngles
+
+
+def getNextPoint2(previousOrientation, orientation, sinOfAngles, cosOfAngles, x, y):
+    """ Orientation bude stale 0-11, previousOrietnation moze byt 0-23 """
+    """ Najprv by mi trebalo urcit novu orientation """
+    if abs(previousOrientation - orientation) > 11:
+        orientation += 12
+
+    if previousOrientation - orientation > 3:
+        orientation = previousOrientation - 3
+
+    if previousOrientation - orientation < -3:
+        orientation = previousOrientation + 3
+
+    if orientation > 11:
+        nextX = int(x + (25 * sinOfAngles[orientation - 12]))
+        nextY = int(y - (25 * cosOfAngles[orientation - 12]))
+    else:
+        nextX = int(x - (25 * sinOfAngles[orientation]))
+        nextY = int(y + (25 * cosOfAngles[orientation]))
+
+    return nextX, nextY, orientation
+
+
+def getNextPoint(comingFrom, previousOrientation, orientation, sinOfAngles, cosOfAngles, x, y, lengthOfLine):
+    if lengthOfLine > 30:
+        orientationDifference = min(abs(orientation - previousOrientation), abs((orientation + 12) - previousOrientation),
+                                    abs(orientation - (previousOrientation + 12)))
+        if orientationDifference > 3:
+            orientation = previousOrientation
+
+    if comingFrom <= 3:
+        nextX = int(x + (25 * sinOfAngles[orientation]))
+        nextY = int(y - (25 * cosOfAngles[orientation]))
+
+        comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 0 and (2 <= comingFromNew <= 5):
+            nextX = int(x - (25 * sinOfAngles[orientation]))
+            nextY = int(y + (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 1 and (4 <= comingFromNew <= 6):
+            nextX = int(x - (25 * sinOfAngles[orientation]))
+            nextY = int(y + (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if (comingFrom == 2 or comingFrom == 3) and (comingFromNew == 0 or comingFromNew >= 6):
+            nextX = int(x - (25 * sinOfAngles[orientation]))
+            nextY = int(y + (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+    else:
+        nextX = int(x - (25 * sinOfAngles[orientation]))
+        nextY = int(y + (25 * cosOfAngles[orientation]))
+
+        comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if 8 <= previousOrientation <= 10 and 0 <= orientation <= 1:
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+            return nextX, nextY, comingFromNew, orientation
+
+        if comingFrom == 6 and (0 <= comingFromNew <= 3):
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 7 and (2 <= comingFromNew <= 4):
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if (comingFrom == 4 or comingFrom == 5) and (comingFromNew == 7 or comingFromNew <= 2):
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+    return nextX, nextY, comingFromNew, orientation
+
+
+def getNextPointMainLineB(previousOrientation, orientation, sinOfAngles, cosOfAngles, x, y, alreadyWentLeft, alreadyAddedPoints):
+    """ Povolene orientacie 0-5 a 17-23 (ked som uz raz isiel dolava)
+        - povolene ist dolava mam iba raz (a to iba v prvych 5 bodoch)
+        - ked bude orientacia od 11 do 17 a pocet bodov je aspon 5 tak idem natvrdo doprava
+        - ked je menej jak 5 bodov tak ked pojdem dolava tak jedine ked je uhol od 14 do 16 - inak idem priamo dole
+        - ked je viac jak 5 bodov idem natvrdo vzdy doprava (ale obmedzim velkost zmeny)"""
+    if 0 <= previousOrientation <= 1 and 9 <= orientation <= 11:
+        orientation += 12
+
+    if previousOrientation > 11:
+        if previousOrientation >= 20 and orientation <= 2:
+            pass
+        else:
+            orientation += 12
+
+    if alreadyAddedPoints <= 8:
+        if alreadyWentLeft and 12 <= orientation <= 16:
+            orientation = 17
+
+        if not alreadyWentLeft and 12 <= orientation <= 16:
+            alreadyWentLeft = True
+
+        """if previousOrientation - orientation > 4:
+            orientation = previousOrientation - 4
+
+        if previousOrientation - orientation < -4:
+            orientation = previousOrientation + 4"""
+
+    else:
+        if alreadyAddedPoints > 30 and 8 > abs(previousOrientation - orientation) > 3:
+            orientation = previousOrientation
+
+        else:
+            if 12 <= orientation <= 16:
+                orientation = orientation - 12
+
+
+        """if previousOrientation - orientation > 4:
+            orientation = previousOrientation - 4
+
+        if previousOrientation - orientation < -4:
+            orientation = previousOrientation + 4"""
+
+    """if alreadyWentLeft and 6 <= orientation <= 16 and 12 <= previousOrientation <= 22:
+        orientation = 17"""
+
+    if orientation > 11:
+        nextX = int(x + (25 * sinOfAngles[orientation - 12]))
+        nextY = int(y - (25 * cosOfAngles[orientation - 12]))
+    else:
+        nextX = int(x - (25 * sinOfAngles[orientation]))
+        nextY = int(y + (25 * cosOfAngles[orientation]))
+
+    """if 6 <= orientation <= 16:
+        alreadyWentLeft = True"""
+
+    return nextX, nextY, orientation, alreadyWentLeft
+
+
+def getNextPointMainLineC(previousOrientation, orientation, sinOfAngles, cosOfAngles, x, y, comingFrom):
+    if comingFrom <= 3:
+        nextX = int(x + (25 * sinOfAngles[orientation]))
+        nextY = int(y - (25 * cosOfAngles[orientation]))
+
+        comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 0 and (2 <= comingFromNew <= 5):
+            nextX = int(x - (25 * sinOfAngles[orientation]))
+            nextY = int(y + (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 1 and (4 <= comingFromNew <= 6):
+            nextX = int(x - (25 * sinOfAngles[orientation]))
+            nextY = int(y + (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if (comingFrom == 2 or comingFrom == 3) and (comingFromNew == 0 or comingFromNew >= 6):
+            if 3 <= previousOrientation <= 4 and 5 <= orientation <= 7:
+                pass
+            else:
+                nextX = int(x - (25 * sinOfAngles[orientation]))
+                nextY = int(y + (25 * cosOfAngles[orientation]))
+
+                comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+    else:
+        nextX = int(x - (25 * sinOfAngles[orientation]))
+        nextY = int(y + (25 * cosOfAngles[orientation]))
+
+        comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 6 and (0 <= comingFromNew <= 3):
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 7 and (2 <= comingFromNew <= 4):
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if (comingFrom == 4 or comingFrom == 5) and (comingFromNew == 7 or comingFromNew <= 2):
+
+            nextX = int(x + (25 * sinOfAngles[orientation]))
+            nextY = int(y - (25 * cosOfAngles[orientation]))
+
+            comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+        if comingFrom == 4 and comingFromNew == 6:
+            if 8 <= previousOrientation <= 10 and 0 <= orientation <= 2:
+                nextX = int(x + (25 * sinOfAngles[orientation]))
+                nextY = int(y - (25 * cosOfAngles[orientation]))
+
+                comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+    return nextX, nextY, comingFromNew, orientation
+
+
+def getNextPointMainLineD(previousOrientation, orientation, sinOfAngles, cosOfAngles, x, y, comingFrom):
+    orientationDifference = min(abs(orientation - previousOrientation), abs((orientation + 12) - previousOrientation),
+                                abs(orientation - (previousOrientation + 12)))
+
     if comingFrom <= 3:
         nextX = int(x + (25 * sinOfAngles[orientation]))
         nextY = int(y - (25 * cosOfAngles[orientation]))
@@ -955,13 +1806,24 @@ def getNextPoint(comingFrom, orientation, sinOfAngles, cosOfAngles, x, y):
 
             comingFromNew = comingFromWhere(x, y, nextX, nextY)
 
+        if comingFrom == 4:
+            a = 3
+
         if (comingFrom == 4 or comingFrom == 5) and (comingFromNew == 7 or comingFromNew <= 2):
+
             nextX = int(x + (25 * sinOfAngles[orientation]))
             nextY = int(y - (25 * cosOfAngles[orientation]))
 
             comingFromNew = comingFromWhere(x, y, nextX, nextY)
 
-    return nextX, nextY, comingFromNew
+        if comingFrom == 4 and comingFromNew == 6:
+            if 8 <= previousOrientation <= 11 and 0 <= orientation <= 2:
+                nextX = int(x + (25 * sinOfAngles[orientation]))
+                nextY = int(y - (25 * cosOfAngles[orientation]))
+
+                comingFromNew = comingFromWhere(x, y, nextX, nextY)
+
+    return nextX, nextY, comingFromNew, orientation
 
 
 def findMainLineA(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks):
@@ -975,6 +1837,7 @@ def findMainLineA(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
 
     currentBlockRow = actualBlockRow + 1
     currentBlockCol = actualBlockCol + 1
+    previousOrientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
     orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
     pointX = (currentBlockRow * blockHeight) + rowInBlock
@@ -989,13 +1852,14 @@ def findMainLineA(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
     comingFrom = 0
 
     i = 0
-    while i < 100:
+    while blocks[currentBlockRow][currentBlockCol]["background"] == 0:
         orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
-        currentX, currentY, comingFrom = getNextPoint(comingFrom, orientation, sinOfAngles, cosOfAngles, currentX,
-                                                      currentY)
+        currentX, currentY, comingFrom, orientation = getNextPoint(comingFrom, previousOrientation, orientation, sinOfAngles,
+                                                      cosOfAngles, currentX, currentY, len(points))
         currentBlockRow = currentX // blockHeight
         currentBlockCol = currentY // blockWidth
+        previousOrientation = orientation
         points.append((currentY, currentX))
         i += 1
 
@@ -1013,6 +1877,7 @@ def findMainLineB(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
 
     currentBlockRow = actualBlockRow + 1
     currentBlockCol = actualBlockCol
+    previousOrientation = blocks[currentBlockRow][currentBlockCol]["orientation"] + 12
     orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
     pointX = (currentBlockRow * blockHeight) + rowInBlock
@@ -1025,16 +1890,22 @@ def findMainLineB(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
     points.append((currentY, currentX))
 
     comingFrom = 1
+    alreadyWentLeft = False
 
     i = 0
-    while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
-    #while i < 100:
+    #while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
+    #while i < 35:
+    while blocks[currentBlockRow][currentBlockCol]["background"] == 0:
+        if i == 25:
+            a = 3
         orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
-        currentX, currentY, comingFrom = getNextPoint(comingFrom, orientation, sinOfAngles, cosOfAngles, currentX,
-                                                      currentY)
+        """currentX, currentY, comingFrom = getNextPoint(comingFrom, previousOrientation, orientation, sinOfAngles, cosOfAngles, currentX,
+                                                      currentY)"""
+        currentX, currentY, orientation, alreadyWentLeft = getNextPointMainLineB(previousOrientation, orientation, sinOfAngles, cosOfAngles, currentX, currentY, alreadyWentLeft, len(points))
         currentBlockRow = currentX // blockHeight
         currentBlockCol = currentY // blockWidth
+        previousOrientation = orientation
         points.append((currentY, currentX))
         i += 1
 
@@ -1057,6 +1928,7 @@ def findMainLineC(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
     else:
         colInBlock += 25
         currentBlockCol = actualBlockCol - 1
+    previousOrientation = blocks[currentBlockRow][currentBlockCol]["orientation"] + 12
     orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
     pointX = (currentBlockRow * blockHeight) + rowInBlock
@@ -1071,14 +1943,17 @@ def findMainLineC(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
     comingFrom = 2
 
     i = 0
-    while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
-    #while i < 100:
+    #while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
+    #while i < 50:
+    while blocks[currentBlockRow][currentBlockCol]["background"] == 0:
         orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
-        currentX, currentY, comingFrom = getNextPoint(comingFrom, orientation, sinOfAngles, cosOfAngles, currentX,
-                                                      currentY)
+        """currentX, currentY, comingFrom = getNextPoint(comingFrom, previousOrientation, orientation, sinOfAngles, cosOfAngles, currentX,
+                                                      currentY)"""
+        currentX, currentY, comingFrom, orientation = getNextPointMainLineC(previousOrientation, orientation, sinOfAngles, cosOfAngles, currentX, currentY, comingFrom)
         currentBlockRow = currentX // blockHeight
         currentBlockCol = currentY // blockWidth
+        previousOrientation = orientation
         points.append((currentY, currentX))
         i += 1
 
@@ -1088,14 +1963,16 @@ def findMainLineC(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
 def findMainLineD(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks):
     points = [(triradius[1], triradius[0])]
 
-    actualBlockRow = triradius[0] // blockHeight
-    rowInBlock = triradius[0] % blockHeight
+    actualBlockRow = (triradius[0] + 10) // blockHeight
+    rowInBlock = (triradius[0] + 10) % blockHeight
     #rowInBlock = 0
     actualBlockCol = triradius[1] // blockWidth
     colInBlock = triradius[1] % blockWidth
 
-    currentBlockRow = actualBlockRow + 1
+    #currentBlockRow = actualBlockRow + 1
+    currentBlockRow = actualBlockRow
     currentBlockCol = actualBlockCol - 1
+    previousOrientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
     orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
     pointX = (currentBlockRow * blockHeight) + rowInBlock
@@ -1110,51 +1987,376 @@ def findMainLineD(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, 
     comingFrom = 2
 
     i = 0
-    while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
-    #while i < 100:
+    while blocks[currentBlockRow][currentBlockCol]["background"] == 0:
+    #while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
+    #while i < 20:
+        if i == 4:
+            a = 2
         orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
 
-        currentX, currentY, comingFrom = getNextPoint(comingFrom, orientation, sinOfAngles, cosOfAngles, currentX,
-                                                      currentY)
+        """currentX, currentY, comingFrom = getNextPoint(comingFrom, previousOrientation, orientation, sinOfAngles, cosOfAngles, currentX,
+                                                      currentY)"""
+        currentX, currentY, comingFrom, orientation = getNextPointMainLineD(previousOrientation, orientation, sinOfAngles, cosOfAngles,
+                                                            currentX, currentY, comingFrom)
         currentBlockRow = currentX // blockHeight
         currentBlockCol = currentY // blockWidth
+        previousOrientation = orientation
         points.append((currentY, currentX))
         i += 1
 
     return points
 
 
-def singularPoints(blocks, blockImage, angles, leftOfFinger2, between23, between34, between45, rightOfFinger5):
+def findMainLineT(triradius, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks):
+    points = [(triradius[1], triradius[0])]
+
+    actualBlockRow = triradius[0] // blockHeight
+    # rowInBlock = triradiusB[0] % blockHeight
+    rowInBlock = 0
+    actualBlockCol = triradius[1] // blockWidth
+    colInBlock = triradius[1] % blockWidth
+
+    currentBlockRow = actualBlockRow - 1
+    currentBlockCol = actualBlockCol
+    previousOrientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
+    orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
+
+    pointX = (currentBlockRow * blockHeight) + rowInBlock
+    pointY = (currentBlockCol * blockWidth) + colInBlock
+    points.append((pointY, pointX))
+
+    currentX = int(pointX - (25 * sinOfAngles[orientation]))
+    currentY = int(pointY + (25 * cosOfAngles[orientation]))
+
+    points.append((currentY, currentX))
+
+    comingFrom = 5
+
+    i = 0
+    while blocks[currentBlockRow][currentBlockCol]["background"] == 0:
+    #while blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] == 0:
+    #while i < 85:
+        if i == 82:
+            a = 3
+        orientation = blocks[currentBlockRow][currentBlockCol]["orientation"]
+
+        currentX, currentY, comingFrom, orientation = getNextPoint(comingFrom, previousOrientation, orientation, sinOfAngles, cosOfAngles, currentX,
+                                                      currentY, len(points))
+        currentBlockRow = currentX // blockHeight
+        currentBlockCol = currentY // blockWidth
+        previousOrientation = orientation
+        points.append((currentY, currentX))
+        i += 1
+
+    return points
+
+
+def findMainLineOutSegment(point, blocks, blockHeight, blockWidth, edgePointsOfSegments):
+    currentBlockRow = point[1] // blockHeight
+    currentBlockCol = point[0] // blockWidth
+
+    if blocks[currentBlockRow][currentBlockCol]["palmprintSegment"] != 0:
+        return blocks[currentBlockRow][currentBlockCol]["palmprintSegment"]
+
+    else:
+        minDistance = 1000
+        minDistanceIndex = 0
+        for i in range(len(edgePointsOfSegments)):
+            edgePointRow, edgePointCol = edgePointsOfSegments[i]
+            distance = math.hypot(edgePointRow - currentBlockRow, edgePointCol - currentBlockCol)
+            if distance < minDistance:
+                minDistance = distance
+                minDistanceIndex = i
+
+        if minDistanceIndex % 2 == 0:
+            minDistanceIndex += 1
+
+        return minDistanceIndex
+
+    #print("NOT FOUND PALMPRINT SEGMENT!!!")
+    #return 0
+
+
+def singularPoints(blocks, blockImage, angles, leftOfFinger2, between23, between34, between45, rightOfFinger5,
+                   directoryName, edgePointsOfSegments):
     blockRows, blockCols, blockHeight, blockWidth = blockImage.shape
     possibleTriradiusBlocks = []
     sinOfAngles = calculateSinOfAngles(angles)
     cosOfAngles = calculateCosOfAngles(angles)
+    sinOfAngles5 = calculateSinOfAngles5(angles)
+    cosOfAngles5 = calculateCosOfAngles5(angles)
 
-    triradiusA = detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23)
-    triradiusB = detectTriradiusB(blocks, blockImage, angles, between23, between34)
-    triradiusC = detectTriradiusB(blocks, blockImage, angles, between34, between45)
-    triradiusD = detectTriradiusD(blocks, blockImage, angles, between45, rightOfFinger5)
+    triradiusA, blocks = detectTriradiusA(blocks, blockImage, angles, leftOfFinger2, between23)
+    triradiusB, blocks = detectTriradiusB(blocks, blockImage, angles, between23, between34)
+    triradiusC, blocks = detectTriradiusB(blocks, blockImage, angles, between34, between45)
+    triradiusD, blocks = detectTriradiusD(blocks, blockImage, angles, between45, rightOfFinger5)
+    """triradiusA = (0, 0)
+    triradiusB = (0, 0)
+    triradiusC = (0, 0)
+    triradiusD = (0, 0)"""
+    triradiusT, blocks = detectTriradiusT(blocks, blockImage, angles)
 
-    exit(2)
+    #mainLines = []
+
+    #saveTriradiusPalmprint(blockImage, triradiusA, triradiusB, triradiusC, triradiusD, triradiusT, mainLines)
+
+    """ Inicializuje masku orientacii """
+    orientationMask = np.zeros((blockRows, blockCols), dtype=np.uint8)
+
+    """ Najde v ktorych blokoch bola urcena orientacia (mimo regionov kde su triradie) """
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["background"] == 0:
+                orientationMask[row][col] = 1
+            if blocks[row][col]["triradiusRegion"] == 1:
+                orientationMask[row][col] = 0
+
+    """ Chcem najst region o velkosti 5x5 blokov, kde je confidence vsetkych orientacii 100 """
+    suitable = False
+    seeds = []
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if orientationMask[row][col] == 1:
+                suitable = True
+                for row2 in range(row, row + 5):
+                    for col2 in range(col, col + 5):
+                        if orientationMask[row2][col2] == 0 or blocks[row2][col2]["orientationConfidence"] != 100:
+                            suitable = False
+                            break
+                    if not suitable:
+                        break
+
+                if suitable:
+                    for row2 in range(row, row + 5):
+                        for col2 in range(col, col + 5):
+                            seeds.append((row2, col2))
+                            orientationMask[row2][col2] = 2
+                    break
+        if suitable:
+            break
+    """ Mam najdeny region o velkosti 5x5 - vsetky jeho bloky som v orientationMask nastavil na 2 (uz spracovane) a 
+    pridal som ich do seeds (bloky, ktorych susedia budu prehladavany) """
+
+    """ Postupne zvacsujem region """
+    while seeds:
+        seedX, seedY = seeds.pop(0)
+        """ Vyberiem si prvy blok zo seeds a pozeram sa na jeho susedov """
+        for row in range(seedX - 1, seedX + 2):
+            for col in range(seedY - 1, seedY + 2):
+                """ Ked to neni odtlacok alebo uz je spracovany, nerobim nic """
+                if row == 86 and col == 72:
+                    a = 2
+                if orientationMask[row][col] == 0 or orientationMask[row][col] == 2:
+                    continue
+                else:
+                    """ Ked je jeho confindence 100 tak ho nastavim ako spracovany, pridam ho do seeds a nerobim nic """
+                    if blocks[row][col]["orientationConfidence"] == 100:
+                        seeds.append((row, col))
+                        orientationMask[row][col] = 2
+                        continue
+                    else:
+                        """ V opacnom pripade sa pokusim dany blok vyhladit """
+                        neighbourOrientations = []
+                        """ Najden 8 orientacii susednych blokov, ktore uz boli spracovane alebo ktorych confidence 
+                        je 100 """
+                        for r in range(row - 1, row + 2):
+                            for c in range(col - 1, col + 2):
+                                """ Okrem aktualne bloku, ktory spracovanam ofc """
+                                if r == row and c == col:
+                                    continue
+                                else:
+                                    if orientationMask[r][c] == 2 or blocks[r][c]["orientationConfidence"] == 100:
+                                        neighbourOrientations.append(blocks[r][c]["orientation"])
+
+                        """ Najprv pripad, ze ked su vsetky susedne rovnake tak ho nastavim tiez na rovnaky """
+                        if len(neighbourOrientations) == 8:
+                            myOrientation = blocks[row][col]["orientation"]
+                            allSame = True
+                            firstOrientation = neighbourOrientations[0]
+                            for neighbour in neighbourOrientations:
+                                if neighbour != firstOrientation:
+                                    allSame = False
+                                    break
+                            if allSame:
+                                blocks[row][col]["orientation"] = firstOrientation
+                            else:
+                                """allSimilar = True
+                                for neighbour in neighbourOrientations:
+                                    if abs(neighbour - firstOrientation) > 1:
+                                        allSimilar = False
+                                        break
+                                if allSimilar:
+                                    if abs(myOrientation - firstOrientation) > 1:
+                                        blocks[row][col]["orientation"] = firstOrientation"""
+                                minOrientation = min(neighbourOrientations)
+                                maxOrientation = max(neighbourOrientations)
+                                orientationDifference = min(abs(maxOrientation - minOrientation),
+                                                            abs(maxOrientation - (minOrientation + 12)))
+                                if orientationDifference <= 2:
+                                    difference = min(abs(myOrientation - firstOrientation),
+                                                     abs((myOrientation + 12) - firstOrientation),
+                                                     abs(myOrientation - (firstOrientation + 12)))
+                                    if difference > 1:
+                                        # Napr v pripade ze maxOrientation je 11 a min je 0
+                                        if maxOrientation - minOrientation > 2:
+                                            blocks[row][col]["orientation"] = minOrientation
+                                        else:
+                                            blocks[row][col]["orientation"] = (minOrientation + maxOrientation) // 2
+
+                        else:
+                            if len(neighbourOrientations) > 0:
+                                myOrientation = blocks[row][col]["orientation"]
+                                firstOrientation = neighbourOrientations[0]
+                                """allSimilar = True
+                                for neighbour in neighbourOrientations:
+                                    if abs(neighbour - firstOrientation) > 1:
+                                        allSimilar = False
+                                        break
+                                if allSimilar:
+                                    if abs(myOrientation - firstOrientation) > 1:
+                                        blocks[row][col]["orientation"] = firstOrientation"""
+                                minOrientation = min(neighbourOrientations)
+                                maxOrientation = max(neighbourOrientations)
+                                orientationDifference = min(abs(maxOrientation - minOrientation),
+                                                            abs(maxOrientation - (minOrientation + 12)))
+                                if orientationDifference <= 2:
+                                    difference = min(abs(myOrientation - firstOrientation),
+                                                     abs((myOrientation + 12) - firstOrientation),
+                                                     abs(myOrientation - (firstOrientation + 12)))
+                                    if difference > 1:
+                                        # Napr v pripade ze maxOrientation je 11 a min je 0
+                                        if maxOrientation - minOrientation > 2:
+                                            blocks[row][col]["orientation"] = minOrientation
+                                        else:
+                                            blocks[row][col]["orientation"] = (minOrientation + maxOrientation) // 2
+
+                        seeds.append((row, col))
+                        orientationMask[row][col] = 2
+
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if row == 58 and col == 63:
+                b = 2
+            if orientationMask[row][col] == 2 and blocks[row][col]["orientationConfidence"] != 100:
+                orientationsInNeighbourhood = [0] * len(angles)
+                for r in range(row - 1, row + 2):
+                    for c in range(col - 1, col + 2):
+                        
+                        if r == row and c == col:
+                            continue
+                        else:
+                            if orientationMask[r][c] != 0:
+                                orientationsInNeighbourhood[blocks[r][c]["orientation"]] += 1
+                if len(orientationsInNeighbourhood) < 2:
+                    continue
+
+                maxOrientations = max(orientationsInNeighbourhood)
+                maxOrientationsValue = orientationsInNeighbourhood.index(maxOrientations)
+                if maxOrientationsValue == 0:
+                    numberOfNeighboursWithSimilarOrientations = maxOrientations + orientationsInNeighbourhood[11] + \
+                                                                orientationsInNeighbourhood[maxOrientationsValue + 1]
+                elif maxOrientationsValue == 11:
+                    numberOfNeighboursWithSimilarOrientations = maxOrientations + orientationsInNeighbourhood[maxOrientationsValue - 1] + \
+                                                                orientationsInNeighbourhood[0]
+                else:
+                    numberOfNeighboursWithSimilarOrientations = maxOrientations + orientationsInNeighbourhood[maxOrientationsValue - 1] + orientationsInNeighbourhood[maxOrientationsValue + 1]
+
+                if numberOfNeighboursWithSimilarOrientations >= 5:
+                    myOrientation = blocks[row][col]["orientation"]
+                    difference = min(abs(myOrientation - maxOrientationsValue), abs((myOrientation + 12) - maxOrientationsValue),
+                                     abs(myOrientation - (maxOrientationsValue + 12)))
+                    if difference > 2:
+                        blocks[row][col]["orientation"] = maxOrientationsValue
+
+    saveOrientationAfterSmoothing(blockImage, blocks, angles, directoryName)
+    """image = mergeBlocksToImage(blockImage)
+    saveOrientationsImage(image, blockImage, blocks, angles)"""
+
+    """for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["triradiusRegion"] == 1:
+                blockImage[row][col] = 255
+
+    image = mergeBlocksToImage(blockImage)
+
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
+
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
+
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    savePalmprint(image)
+    exit(2)"""
 
     mainLines = []
 
-    #mainLineA = findMainLineA(triradiusA, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
-    #mainLineB = findMainLineB(triradiusB, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
-    #mainLineC = findMainLineC(triradiusC, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
-    #mainLineD = findMainLineD(triradiusD, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
+    triradiusAout = 0
+    if triradiusA != (0, 0):
+        mainLineA = findMainLineA(triradiusA, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
+        mainLines.append(mainLineA)
+        triradiusAout = findMainLineOutSegment(mainLineA[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        if triradiusAout == 55:
+            triradiusAout = "5\""
+        print(f"A - {triradiusAout}")
 
-    #mainLines.append(mainLineA)
-    #mainLines.append(mainLineB)
-    #mainLines.append(mainLineC)
-    #mainLines.append(mainLineD)
+    triradiusBout = 0
+    if triradiusB != (0, 0):
+        mainLineB = findMainLineB(triradiusB, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
+        mainLines.append(mainLineB)
+        triradiusBout = findMainLineOutSegment(mainLineB[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        if triradiusBout == 55:
+            triradiusBout = "5\""
+        print(f"B - {triradiusBout}")
 
-    saveTriradiusPalmprint(blockImage, triradiusA, triradiusB, triradiusC, triradiusD, mainLines)
+    triradiusCout = 0
+    if triradiusC != (0, 0):
+        mainLineC = findMainLineC(triradiusC, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
+        mainLines.append(mainLineC)
+        triradiusCout = findMainLineOutSegment(mainLineC[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        if triradiusCout == 55:
+            triradiusCout = "5\""
+        print(f"C - {triradiusCout}")
 
-    #exit(2)
+    triradiusDout = 0
+    if triradiusD != (0, 0):
+        mainLineD = findMainLineD(triradiusD, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
+        triradiusDout = findMainLineOutSegment(mainLineD[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        if triradiusDout == 55:
+            triradiusDout = "5\""
+        if (triradiusCout == "5\'" or triradiusCout == "5\"") and triradiusDout == 9:
+            mainLineD = findMainLineD(triradiusD, blockHeight, blockWidth, sinOfAngles5, cosOfAngles5, blocks)
+            triradiusDout = findMainLineOutSegment(mainLineD[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        if (triradiusBout == "5\'" or triradiusBout == "5\"") and triradiusDout == 11:
+            mainLineD = findMainLineD(triradiusD, blockHeight, blockWidth, sinOfAngles5, cosOfAngles5, blocks)
+            triradiusDout = findMainLineOutSegment(mainLineD[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        mainLines.append(mainLineD)
+        print(f"D - {triradiusDout}")
 
-    #blockImage = detectTriradiusC(blocks, blockImage, angles, leftOfFinger2, between23)
-    #blockImage = detectTriradiusD(blocks, blockImage, angles, leftOfFinger2, between23)
+    triradiusTout = 0
+    if triradiusT != (0, 0):
+        mainLineT = findMainLineT(triradiusT, blockHeight, blockWidth, sinOfAngles, cosOfAngles, blocks)
+        mainLines.append(mainLineT)
+        triradiusTout = findMainLineOutSegment(mainLineT[-1], blocks, blockHeight, blockWidth, edgePointsOfSegments)
+        if triradiusTout == 1313:
+            triradiusTout = "13\'"
+        print(f"T - {triradiusTout}")
+
+    saveTriradiusPalmprint(blockImage, triradiusA, triradiusB, triradiusC, triradiusD, triradiusT, mainLines, directoryName)
+
+    #block = blockImage[60][50]
+
+    """for r in range(blockRows):
+        for c in range(blockCols):
+            if blocks[r][c]["orientationConfidence"] == 100:
+                saveBlock(blockImage[r][c])"""
 
     #return blockImage
 
@@ -1164,45 +2366,235 @@ def main():
     blockWidth = 50
     start = timer()
 
-    image = loadPalmprint('dlane/muzi/2019_M_0021_HR02.tif')
+    directoryName = "NORM_8_M_L_CP_001"
+
+    if not os.path.exists(directoryName):
+        os.mkdir(directoryName)
+
+    image = loadPalmprint(f'dlane/muzi/{directoryName}.tif')
     image = image[:-2]
     blockImage, blocks = splitImageToBlocks(image, blockHeight, blockWidth)
 
-    #showPalmprint(blockImage[50][50])
+    """saveBlock(blockImage[61][64])
+    exit(3)"""
 
-    blocks, leftOfFinger2, between23, between34, between45, rightOfFinger5 = segmentation(blockImage, blocks, image)
+    """ --------------------------------------------------- """
 
-    """angles = splitIntoParts(math.pi, 12)
-    sinOfAngles = calculateSinOfAngles(angles)
-    cosOfAngles = calculateCosOfAngles(angles)
-
-    startingPoint = (2700, 2876)
-    pointX, pointY = startingPoint
-    orientation = 5
-    points = []
-    points.append((startingPoint[1], startingPoint[0]))
-
-    x = int(pointX - (25 * sinOfAngles[orientation]))
-    y = int(pointY + (25 * cosOfAngles[orientation]))
-
-    points.append((y, x))
+    """blockImage[65][52] = 0
 
     image = mergeBlocksToImage(blockImage)
 
-    for point in range(len(points) - 1):
-        image = cv2.line(image, points[point], points[point + 1], (0, 0, 255), 3)
+    scale_percent = 15  # percent of original size
+    imageHeight, imageWidth = image.shape
 
-    cv2.imwrite('triradiusPalmprint.bmp', image)
+    height = int(imageHeight * scale_percent / 100)
+    width = int(imageWidth * scale_percent / 100)
+    dim = (width, height)
 
+    # resize image
+    resized = cv2.resize(image, dim, interpolation=cv2.INTER_AREA)
+
+    cv2.imshow('image', resized)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+    savePalmprint(image)
     exit(2)"""
 
-    blocks, angles = orientationField(blockImage, blocks, image)
+    #showPalmprint(blockImage[50][50])
 
+    image, blockImage, blocks, leftOfFinger2, between23, between34, between45, rightOfFinger5, bottomPointOfSegment1, \
+    bottomPointOfSegment3, palmprintBorder, edgePointsOfSegments = segmentation(blockImage, blocks, image, directoryName)
+
+    blocks = principleLines(image, blocks, blockImage, leftOfFinger2, bottomPointOfSegment1, rightOfFinger5,
+                            bottomPointOfSegment3, palmprintBorder)
+
+    saveSegmentedPalmprint(blockImage, blocks, directoryName)
+    blocks, angles = orientationField(blockImage, blocks, image, directoryName)
+
+    """blockRows, blockCols, _, _ = blockImage.shape
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["orientationConfidence"] == 100:
+                blockImage[row][col] = 0
+
+    image = mergeBlocksToImage(blockImage)
+
+    savePalmprint(image)
+    exit(2)"""
+
+    sinOfAngles = calculateSinOfAngles(angles)
+    cosOfAngles = calculateCosOfAngles(angles)
+
+    blockRows, blockCols, _, _ = blockImage.shape
+
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["orientationConfidence"] != 100:
+                continue
+            block = blockImage[row][col]
+            orient = blocks[row][col]["orientation"]
+            print(orient)
+            i = 25
+            j = 25
+            windowHeight = 50
+            windowWidth = 25
+
+            orienta = (orient + 5) % 12
+
+            blur = cv2.GaussianBlur(block, (5, 5), 0)
+            ret3, th3 = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            saveBlock(block)
+
+            blur2 = cv2.GaussianBlur(th3, (5, 5), 0)
+
+            sum = [0] * windowHeight
+            for k in range(windowHeight):
+                sum[k] = 0
+                numberOfAdded = 0
+                for d in range(windowWidth):
+                    u = i + (d - windowWidth / 2) * cosOfAngles[orienta] + (k - windowHeight / 2) * sinOfAngles[orienta]
+                    v = j + (d - windowWidth / 2) * sinOfAngles[orienta] + (windowHeight / 2 - k) * cosOfAngles[orienta]
+                    u = round(u)
+                    v = round(v)
+                    if 0 <= u <= 49 and 0 <= v <= 49:
+                        sum[k] += blur[u][v]
+                        numberOfAdded += 1
+                        # block[u][v] = 0
+                sum[k] = int(sum[k] / numberOfAdded)
+
+            sumSmoothened = [0] * windowHeight
+            sumSmoothened[0] = sum[0]
+            sumSmoothened[-1] = sum[-1]
+            for aaa in range(1, len(sum) - 1):
+                sumSmoothened[aaa] = int((sum[aaa - 1] + sum[aaa] + sum[aaa + 1]) / 3)
+
+            priemer = np.mean(sum)
+            hranica = [priemer] * 50
+
+            a = []
+            b = []
+            if sum[0] > priemer:
+                nadHranicou = True
+                podHranicou = False
+            else:
+                nadHranicou = False
+                podHranicou = True
+
+            for k in range(1, windowHeight):
+                if sum[k] > priemer and podHranicou:
+                    a.append(k)
+                    nadHranicou = True
+                    podHranicou = False
+                if sum[k] <= priemer and nadHranicou:
+                    b.append(k)
+                    nadHranicou = False
+                    podHranicou = True
+
+            if len(a) < 3 or len(b) < 3:
+                break
+
+            else:
+                distanceA = 0
+                for bottomUpIndex in range(len(a) - 1):
+                    distanceA += a[bottomUpIndex + 1] - a[bottomUpIndex]
+                averageDistanceA = distanceA / (len(a) - 1)
+                validA = True
+                for i in range(len(a) - 1):
+                    distance = a[i + 1] - a[i]
+                    if abs(distance - averageDistanceA) > 5:
+                        validA = False
+                        break
+                if not validA:
+                    print(f"{a} - {averageDistanceA} => {1 / averageDistanceA} --- NOT VALID")
+                else:
+                    print(f"{a} - {averageDistanceA} => {1 / averageDistanceA} --- OK")
+
+                distanceB = 0
+                for upBottomIndex in range(len(b) - 1):
+                    distanceB += b[upBottomIndex + 1] - b[upBottomIndex]
+                averageDistanceB = distanceB / (len(b) - 1)
+                validB = True
+                for i in range(len(b) - 1):
+                    distance = b[i + 1] - b[i]
+                    if abs(distance - averageDistanceB) > 5:
+                        validB = False
+                        break
+                if not validB:
+                    print(f"{b} - {averageDistanceB} => {1 / averageDistanceB} --- NOT VALID")
+                else:
+                    print(f"{b} - {averageDistanceB} => {1 / averageDistanceB} --- OK")
+
+                if validA and validB:
+                    averageDistance = (averageDistanceA + averageDistanceB) // 2
+                    blockFrequency = 1 / averageDistance
+                    blocks[row][col]["frequency"] = blockFrequency
+                    print(f"Frekvencia - {blockFrequency}")
+
+                    if a[0] > b[0]:
+                        b.pop(0)
+
+                    if len(a) > len(b):
+                        numberOfWidthCount = len(a) - 2
+                    else:
+                        numberOfWidthCount = len(a) - 1
+
+                    width = 0
+                    i = 0
+                    middleOfValleys = copy.deepcopy(hranica)
+                    for crossingIndex in range(numberOfWidthCount):
+                        i += 1
+                        firstBottomUp = a[crossingIndex]
+                        secondBottomUp = a[crossingIndex + 1]
+                        firstUpBottom = b[crossingIndex]
+                        secondUpBottom = b[crossingIndex + 1]
+                        middleOfValley1 = (firstUpBottom + firstBottomUp) / 2
+                        middleOfValley2 = (secondUpBottom + secondBottomUp) / 2
+                        middleOfValleys[int(middleOfValley1)] = 255
+                        middleOfValleys[int(middleOfValley2)] = 255
+                        width += middleOfValley2 - middleOfValley1
+
+                    blocks[row][col]["ridgeWidth"] = width / i
+                    print(f"Width - {width / i}")
+
+
+            # print(sum)
+
+            """plt.plot(sum)
+            plt.plot(hranica)
+            plt.plot(sumSmoothened)
+            if validA and validB:
+                plt.plot(middleOfValleys)
+            plt.savefig('threshBez.png')
+
+            # function to show the plot
+            plt.show()"""
+
+            # saveBlock(block)
+
+    frequency = 0
+    frequencyCount = 0
+    width = 0
+    widthCount = 0
+    for row in range(blockRows):
+        for col in range(blockCols):
+            if blocks[row][col]["frequency"] != 0:
+                frequency += blocks[row][col]["frequency"]
+                frequencyCount += 1
+            if blocks[row][col]["ridgeWidth"] != 0:
+                width += blocks[row][col]["ridgeWidth"]
+                widthCount += 1
+
+
+    f = open(f"{directoryName}/widthAndFrequency.txt", "a")
+    f.write(f"Frequency - {frequency / frequencyCount}\n")
+    f.write(f"Ridge width - {width / widthCount}")
+    f.close()
     #orientationField(blockImage[20][20])
 
-    #principleLines(image, blocks, blockImage)
-
-    singularPoints(blocks, blockImage, angles, leftOfFinger2, between23, between34, between45, rightOfFinger5)
+    singularPoints(blocks, blockImage, angles, leftOfFinger2, between23, between34, between45, rightOfFinger5,
+                   directoryName, edgePointsOfSegments)
 
     #image = mergeBlocksToImage(blockImage)
 
