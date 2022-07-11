@@ -1,3 +1,5 @@
+Táto diplomová práca sa zaoberá získavaním informácií z odtlačkov dlane. Jej hlavným cieľom je extrahovať z odtlačku dlane informácie o lokálnej orientácii, frekvencii a šírke papilárnych línií, detegovať flekčné ryhy a trirádiá a sledovať priebeh hlavných línií vrátane určenia indexu hlavných línií. Výsledkom tejto práce je aplikácia s grafickým užívateľským rozhraním, ktorá okrem získania informácii z odtlačku dlane tieto informácie graficky zobrazí, štatisticky spracuje a umožní ich export. Testovanie a vyhodnotenie prebehlo na dátovej sade poskytnutej Ústavom antropológie Prírodovedeckej fakulty Masarykovej univerzity v Brne, na ktorej dosiahla detekcia trirádií úspešnosť 84,8 %, úspešnosť určenia ukončenia hlavných línií dosiahla hodnotu 85,38 % a určenie indexu hlavných línií dosahovalo úspešnosť 78 %.
+
 ## Návod na použitie aplikácie 
 
 ### Aplikácia pre získavanie podrobných informácií z odtlačkov dlane 
